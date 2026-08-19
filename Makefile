@@ -1,4 +1,4 @@
-.PHONY: all build run test clean db-up db-down
+.PHONY: all build run test clean db-up db-down test-load
 
 all: build
 
@@ -20,3 +20,7 @@ db-up:
 
 db-down:
 	docker-compose down
+
+# k6 壓力測試指令 (透過 Docker 執行，無需本機安裝)
+test-load:
+	docker run --rm -i grafana/k6 run -e API_URL=http://host.docker.internal:8080 - < tests/load/spin.js
