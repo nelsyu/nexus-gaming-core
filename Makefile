@@ -6,7 +6,8 @@ build:
 	go build -o bin/server.exe cmd/server/main.go
 
 run:
-	go run cmd/server/main.go
+	docker-compose up --build -d api-server
+	docker-compose logs -f api-server
 
 test:
 	go test -v ./...
@@ -23,4 +24,4 @@ db-down:
 
 # k6 壓力測試指令 (透過 Docker 執行，無需本機安裝)
 test-load:
-	docker run --rm -i grafana/k6 run -e API_URL=http://host.docker.internal:8080 - < tests/load/spin.js
+	docker run --rm -i --network nexus-gaming-core_default grafana/k6 run -e API_URL=http://api-server:8080 - < tests/load/spin.js

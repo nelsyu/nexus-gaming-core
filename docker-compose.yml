@@ -11,3 +11,51 @@ services:
     volumes:
       - ./scripts:/docker-entrypoint-initdb.d
     restart: unless-stopped
+
+  redis-master:
+    image: bitnami/redis:latest
+    container_name: nexus_redis_master
+    environment:
+      - REDIS_REPLICATION_MODE=master
+      - ALLOW_EMPTY_PASSWORD=yes
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  redis-replica:
+    image: bitnami/redis:latest
+    container_name: nexus_redis_replica
+    environment:
+      - REDIS_REPLICATION_MODE=slave
+      - REDIS_MASTER_HOST=redis-master
+      - ALLOW_EMPTY_PASSWORD=yes
+    restart: unless-stopped
+    depends_on:
+      - redis-master
+
+  redis-sentinel:
+    image: bitnami/redis-sentinel:latest
+    container_name: nexus_redis_sentinel
+    environment:
+      - REDIS_MASTER_HOST=redis-master
+      - REDIS_MASTER_SET=mymaster
+      - REDIS_SENTINEL_QUORUM=1
+      - ALLOW_EMPTY_PASSWORD=yes
+    ports:
+      - "26379:26379"
+    restart: unless-stopped
+    depends_on:
+      - redis-master
+      - redis-replica
+
+  api-server:
+    build: .
+    container_name: nexus_api_server
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - redis-sentinel

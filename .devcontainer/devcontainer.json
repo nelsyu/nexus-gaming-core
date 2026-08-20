@@ -1,0 +1,35 @@
+{
+	"name": "Nexus Core Dev Environment",
+	"image": "mcr.microsoft.com/devcontainers/go:1",
+	
+	// 將這個開發容器連接到我們 docker-compose 所建立的網路上
+	// 這樣在 VS Code 裡面就可以直接用 `nexus_db` 和 `nexus_redis_sentinel` 來連線了
+	"runArgs": ["--network=nexus-gaming-core_default"],
+
+	// 設定環境變數，強制 Go 不走可能有 IPv6 問題的預設 Proxy，或者使用其他 Proxy
+	"containerEnv": {
+		"GOPROXY": "https://goproxy.io,direct"
+	},
+
+	// 開發容器啟動後，安裝常用的 Go 開發工具與 Air (Hot Reload)
+	"postCreateCommand": "go install github.com/air-verse/air@latest && go install github.com/go-delve/delve/cmd/dlv@latest",
+
+	// 設定 VS Code 裡面的擴充套件
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"golang.go",
+				"esbenp.prettier-vscode",
+				"eamodio.gitlens"
+			],
+			"settings": {
+				"go.toolsManagement.checkForUpdates": "local",
+				"go.useLanguageServer": true,
+				"go.gopath": "/go"
+			}
+		}
+	},
+	
+	// 以 root 權限執行，方便安裝套件
+	"remoteUser": "root"
+}
