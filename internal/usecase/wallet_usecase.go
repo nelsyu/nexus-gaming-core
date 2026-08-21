@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/bosstest/nexus-core/internal/domain"
 	"github.com/bosstest/nexus-core/internal/repository/postgres"
@@ -16,6 +17,7 @@ type walletUsecase struct {
 	walletR domain.WalletRepository
 	txR     domain.TransactionRepository
 	cache   *redis.WalletCache
+	pub     domain.EventPublisher
 }
 
 // NewWalletUsecase 建立 WalletUsecase 實例
@@ -24,12 +26,14 @@ func NewWalletUsecase(
 	walletR domain.WalletRepository,
 	txR domain.TransactionRepository,
 	cache *redis.WalletCache,
+	pub domain.EventPublisher,
 ) domain.WalletUsecase {
 	return &walletUsecase{
 		db:      db,
 		walletR: walletR,
 		txR:     txR,
 		cache:   cache,
+		pub:     pub,
 	}
 }
 
@@ -156,9 +160,17 @@ func (u *walletUsecase) ProcessTransaction(ctx context.Context, req *domain.Tran
 	// 8. 提交事務
 	if err := sqlxTx.Commit(); err != nil {
 		// 走到這裡通常是很嚴重的系統異常，此時 Redis 已經預扣了，DB 卻沒寫入。
-		// 導入訊息佇列時，這裡應該發送補償事件，目前我們先移除防重鎖允許遊戲商重試。
+		// 透過 RabbitMQ 發送補償事件，交由 Worker 去執行 Redis 退款並移除防重鎖，確保最終一致性。
 		if req.Type == domain.TxTypeBet {
-			_ = u.cache.RemoveLock(ctx, req.ProviderID, req.ProviderTxID)
+			// 發送補償事件到 RabbitMQ
+			_ = u.pub.PublishCompensationEvent(context.Background(), &domain.CompensationEvent{
+				ProviderID:   req.ProviderID,
+				ProviderTxID: req.ProviderTxID,
+				UserID:       req.UserID,
+				Currency:     req.Currency,
+				Amount:       req.Amount, // 需要補回的金額
+				Timestamp:    time.Now(),
+			})
 		}
 		return nil, fmt.Errorf("commit transaction failed: %w", err)
 	}
@@ -167,6 +179,21 @@ func (u *walletUsecase) ProcessTransaction(ctx context.Context, req *domain.Tran
 	// 使用 HSETNX (若不存在才寫入)，避免覆寫其他並發交易的 HINCRBYFLOAT 增減，確保快取數據正確。
 	balanceAfterFloat, _ := newTx.BalanceAfter.Float64()
 	_ = u.cache.InitCacheIfMissing(ctx, req.UserID, req.Currency, balanceAfterFloat)
+
+	// 9. 發送非同步事件，交給 Worker 處理後續任務 (例如報表、返水)
+	// 即使發送失敗也不 rollback，因為核心金流已成功，可透過對帳腳本補償
+	event := &domain.TransactionCompletedEvent{
+		TransactionID: fmt.Sprintf("%d", newTx.ID),
+		ProviderID:    newTx.ProviderID,
+		ProviderTxID:  newTx.ProviderTxID,
+		UserID:        wallet.UserID,
+		Currency:      wallet.Currency,
+		Type:          newTx.Type,
+		Amount:        newTx.Amount,
+		BalanceAfter:  newTx.BalanceAfter,
+		Timestamp:     newTx.CreatedAt,
+	}
+	_ = u.pub.PublishTransactionCompleted(context.Background(), event)
 
 	return newTx, nil
 }

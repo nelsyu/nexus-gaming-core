@@ -6,6 +6,7 @@ import (
 
 	nexushttp "github.com/bosstest/nexus-core/internal/delivery/http"
 	"github.com/bosstest/nexus-core/internal/repository/postgres"
+	"github.com/bosstest/nexus-core/internal/repository/rabbitmq"
 	"github.com/bosstest/nexus-core/internal/repository/redis"
 	"github.com/bosstest/nexus-core/internal/usecase"
 	"github.com/joho/godotenv"
@@ -48,21 +49,33 @@ func main() {
 	defer rdb.Close()
 	walletCache := redis.NewWalletCache(rdb)
 
-	// 4. 依賴注入 (Dependency Injection)
+	// 4. 初始化 RabbitMQ
+	rabbitMQUrl := os.Getenv("RABBITMQ_URL")
+	if rabbitMQUrl == "" {
+		rabbitMQUrl = "amqp://guest:guest@localhost:5672/"
+	}
+	rmqClient, err := rabbitmq.InitRabbitMQ(rabbitMQUrl)
+	if err != nil {
+		log.Fatalf("Failed to initialize RabbitMQ: %v", err)
+	}
+	defer rmqClient.Close()
+	eventPublisher := rabbitmq.NewEventPublisher(rmqClient)
+
+	// 5. 依賴注入 (Dependency Injection)
 	// 初始化 Repositories
 	walletRepo := postgres.NewWalletRepository(db)
 	txRepo := postgres.NewTransactionRepository(db)
 
 	// 初始化 Usecase
-	walletUsecase := usecase.NewWalletUsecase(db, walletRepo, txRepo, walletCache)
+	walletUsecase := usecase.NewWalletUsecase(db, walletRepo, txRepo, walletCache, eventPublisher)
 
 	// 初始化 Handler
 	walletHandler := nexushttp.NewWalletHandler(walletUsecase)
 
-	// 5. 註冊路由
+	// 6. 註冊路由
 	router := nexushttp.SetupRouter(walletHandler)
 
-	// 6. 啟動伺服器
+	// 7. 啟動伺服器
 	log.Printf("Nexus-Core Server starting on port %s...", port)
 	if err := router.Run(":" + port); err != nil {
 		log.Fatalf("Failed to run server: %v", err)

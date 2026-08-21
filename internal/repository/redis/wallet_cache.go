@@ -12,15 +12,21 @@ import (
 //go:embed pre_deduct.lua
 var preDeductScript string
 
+//go:embed refund_and_unlock.lua
+var refundUnlockScript string
+
 type WalletCache struct {
-	client *redis.Client
-	script *redis.Script
+	client       *redis.Client
+	preDeduct    *redis.Script
+	refundUnlock *redis.Script
 }
 
+// NewWalletCache 建立新的 WalletCache 實例
 func NewWalletCache(client *redis.Client) *WalletCache {
 	return &WalletCache{
-		client: client,
-		script: redis.NewScript(preDeductScript),
+		client:       client,
+		preDeduct:    redis.NewScript(preDeductScript),
+		refundUnlock: redis.NewScript(refundUnlockScript),
 	}
 }
 
@@ -40,7 +46,7 @@ func (c *WalletCache) PreDeduct(ctx context.Context, providerID, providerTxID st
 	keys := []string{txLockKey, walletKey}
 	args := []any{"BET", amount}
 
-	result, err := c.script.Run(ctx, c.client, keys, args...).Int()
+	result, err := c.preDeduct.Run(ctx, c.client, keys, args...).Int()
 	if err != nil {
 		return -1, fmt.Errorf("redis script run failed: %w", err)
 	}
@@ -61,8 +67,19 @@ func (c *WalletCache) InitCacheIfMissing(ctx context.Context, userID int64, curr
 	return err
 }
 
-// RemoveLock 當後續 DB 落庫失敗時，需要清除防重鎖以允許重試
-func (c *WalletCache) RemoveLock(ctx context.Context, providerID, providerTxID string) error {
+// RefundAndUnlock 執行原子化的退款並移除防重鎖
+func (c *WalletCache) RefundAndUnlock(ctx context.Context, userID int64, currency, providerID, providerTxID string, amount float64) error {
 	txLockKey := fmt.Sprintf("tx:%s:%s", providerID, providerTxID)
-	return c.client.Del(ctx, txLockKey).Err()
+	walletKey := fmt.Sprintf("wallet:%d:%s", userID, currency)
+
+	keys := []string{txLockKey, walletKey}
+	args := []any{amount}
+
+	err := c.refundUnlock.Run(ctx, c.client, keys, args...).Err()
+	if err != nil {
+		return fmt.Errorf("redis refund script run failed: %w", err)
+	}
+
+	return nil
 }
+
