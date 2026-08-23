@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/bosstest/nexus-core/internal/domain"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -15,20 +16,7 @@ var preProcessScript string
 //go:embed refund_and_unlock.lua
 var refundUnlockScript string
 
-// 操作方向常數
-const (
-	OpDebit  = "DEBIT"
-	OpCredit = "CREDIT"
-)
-
-// PreProcess 結果常數
-const (
-	ResultSuccess      = 0
-	ResultDuplicateTx  = 1
-	ResultInsufficient = 2
-	ResultCacheMiss    = 3
-)
-
+// WalletCache 實作了 domain.WalletCache 介面
 type WalletCache struct {
 	client       *redis.Client
 	preProcess   *redis.Script
@@ -36,7 +24,7 @@ type WalletCache struct {
 }
 
 // NewWalletCache 建立新的 WalletCache 實例
-func NewWalletCache(client *redis.Client) *WalletCache {
+func NewWalletCache(client *redis.Client) domain.WalletCache {
 	return &WalletCache{
 		client:       client,
 		preProcess:   redis.NewScript(preProcessScript),

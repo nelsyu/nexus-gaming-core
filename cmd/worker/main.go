@@ -9,8 +9,8 @@ import (
 	"syscall"
 
 	"github.com/bosstest/nexus-core/internal/domain"
-	"github.com/bosstest/nexus-core/internal/repository/rabbitmq"
-	"github.com/bosstest/nexus-core/internal/repository/redis"
+	"github.com/bosstest/nexus-core/internal/infrastructure/rabbitmq"
+	"github.com/bosstest/nexus-core/internal/infrastructure/redis"
 	"github.com/joho/godotenv"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/shopspring/decimal"
@@ -87,7 +87,7 @@ func main() {
 	log.Println("[Worker] Shutting down gracefully...")
 }
 
-func processMessage(d amqp.Delivery, cache *redis.WalletCache) {
+func processMessage(d amqp.Delivery, cache domain.WalletCache) {
 	if d.RoutingKey == rabbitmq.RoutingKeyComp {
 		var compEvent domain.CompensationEvent
 		if err := json.Unmarshal(d.Body, &compEvent); err != nil {

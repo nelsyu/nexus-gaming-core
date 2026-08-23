@@ -7,5 +7,6 @@ var (
 	ErrWalletNotFound      = errors.New("wallet not found")
 	ErrInsufficientFunds   = errors.New("insufficient funds")
 	ErrDuplicateTransaction = errors.New("duplicate transaction") // 冪等性防重複
-	ErrOptimisticLock      = errors.New("optimistic lock error")  // 併發更新衝突
+	ErrOptimisticLock       = errors.New("optimistic lock error") // 併發更新衝突
+	ErrCommitFailed         = errors.New("commit transaction failed")
 )

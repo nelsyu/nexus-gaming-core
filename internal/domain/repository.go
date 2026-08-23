@@ -30,3 +30,29 @@ type TransactionRepository interface {
 	// 透過第三方交易 ID 查詢是否已存在 (防重檢查)
 	GetByProviderTxID(ctx context.Context, providerID, providerTxID string) (*Transaction, error)
 }
+
+// 操作方向常數 (用於 Redis 快取)
+const (
+	OpDebit  = "DEBIT"
+	OpCredit = "CREDIT"
+)
+
+// PreProcess 結果常數
+const (
+	ResultSuccess      = 0
+	ResultDuplicateTx  = 1
+	ResultInsufficient = 2
+	ResultCacheMiss    = 3
+)
+
+// WalletCache 定義了快取層的介面
+type WalletCache interface {
+	PreProcess(ctx context.Context, op, providerID, providerTxID string, userID int64, currency string, amount float64) (int, error)
+	InitCacheIfMissing(ctx context.Context, userID int64, currency string, balance float64) error
+	RefundAndUnlock(ctx context.Context, userID int64, currency, providerID, providerTxID string, amount float64) error
+}
+
+// UnitOfWork 封裝了資料庫交易邊界
+type UnitOfWork interface {
+	DoTx(ctx context.Context, fn func(txCtx context.Context) error) error
+}

@@ -5,9 +5,9 @@ import (
 	"os"
 
 	nexushttp "github.com/bosstest/nexus-core/internal/delivery/http"
-	"github.com/bosstest/nexus-core/internal/repository/postgres"
-	"github.com/bosstest/nexus-core/internal/repository/rabbitmq"
-	"github.com/bosstest/nexus-core/internal/repository/redis"
+	"github.com/bosstest/nexus-core/internal/infrastructure/postgres"
+	"github.com/bosstest/nexus-core/internal/infrastructure/rabbitmq"
+	"github.com/bosstest/nexus-core/internal/infrastructure/redis"
 	"github.com/bosstest/nexus-core/internal/usecase"
 	"github.com/joho/godotenv"
 )
@@ -65,9 +65,10 @@ func main() {
 	// 初始化 Repositories
 	walletRepo := postgres.NewWalletRepository(db)
 	txRepo := postgres.NewTransactionRepository(db)
+	uow := postgres.NewUnitOfWork(db)
 
 	// 初始化 Usecase
-	walletUsecase := usecase.NewWalletUsecase(db, walletRepo, txRepo, walletCache, eventPublisher)
+	walletUsecase := usecase.NewWalletUsecase(uow, walletRepo, txRepo, walletCache, eventPublisher)
 
 	// 初始化 Handler
 	walletHandler := nexushttp.NewWalletHandler(walletUsecase)
