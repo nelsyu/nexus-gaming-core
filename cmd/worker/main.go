@@ -97,15 +97,23 @@ func processMessage(d amqp.Delivery, cache *redis.WalletCache) {
 		}
 
 		amountFloat, _ := compEvent.Amount.Float64()
-		// 執行 Redis 退款並移除防重鎖
-		err := cache.RefundAndUnlock(context.Background(), compEvent.UserID, compEvent.Currency, compEvent.ProviderID, compEvent.ProviderTxID, amountFloat)
+		// 根據原始操作的方向決定補償方向：
+		// DEBIT Redis 已扣款 → 補償需加回 (RefundAndUnlock 內部用 HINCRBYFLOAT +amount)
+		// CREDIT Redis 已加款 → 補償需扣回 (傳入負值)
+		compensationAmount := amountFloat
+		if compEvent.Type == domain.TxTypeWin || compEvent.Type == domain.TxTypeDeposit || compEvent.Type == domain.TxTypeRefund {
+			compensationAmount = -amountFloat // 逆向補償
+		}
+
+		err := cache.RefundAndUnlock(context.Background(), compEvent.UserID, compEvent.Currency, compEvent.ProviderID, compEvent.ProviderTxID, compensationAmount)
 		if err != nil {
 			log.Printf("[Worker] ❌ Failed to revert Redis balance: %v", err)
 			_ = d.Nack(false, true) // 重試
 			return
 		}
 
-		log.Printf("[Worker] 🔧 Successfully reverted Redis balance for User=%d, ProviderTxID=%s, Amount=+%s", compEvent.UserID, compEvent.ProviderTxID, compEvent.Amount.String())
+		log.Printf("[Worker] 🔧 Compensation done: Type=%s, User=%d, ProviderTxID=%s, Amount=%s",
+			compEvent.Type, compEvent.UserID, compEvent.ProviderTxID, compEvent.Amount.String())
 		_ = d.Ack(false)
 		return
 	}

@@ -9,28 +9,19 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-//go:embed pre_deduct.lua
-var preDeductScript string
+//go:embed pre_process.lua
+var preProcessScript string
 
 //go:embed refund_and_unlock.lua
 var refundUnlockScript string
 
-type WalletCache struct {
-	client       *redis.Client
-	preDeduct    *redis.Script
-	refundUnlock *redis.Script
-}
+// 操作方向常數
+const (
+	OpDebit  = "DEBIT"
+	OpCredit = "CREDIT"
+)
 
-// NewWalletCache 建立新的 WalletCache 實例
-func NewWalletCache(client *redis.Client) *WalletCache {
-	return &WalletCache{
-		client:       client,
-		preDeduct:    redis.NewScript(preDeductScript),
-		refundUnlock: redis.NewScript(refundUnlockScript),
-	}
-}
-
-// 預扣款結果常數
+// PreProcess 結果常數
 const (
 	ResultSuccess      = 0
 	ResultDuplicateTx  = 1
@@ -38,17 +29,36 @@ const (
 	ResultCacheMiss    = 3
 )
 
-// PreDeduct 執行原子化的 Lua 預扣款
-func (c *WalletCache) PreDeduct(ctx context.Context, providerID, providerTxID string, userID int64, currency string, amount float64) (int, error) {
+type WalletCache struct {
+	client       *redis.Client
+	preProcess   *redis.Script
+	refundUnlock *redis.Script
+}
+
+// NewWalletCache 建立新的 WalletCache 實例
+func NewWalletCache(client *redis.Client) *WalletCache {
+	return &WalletCache{
+		client:       client,
+		preProcess:   redis.NewScript(preProcessScript),
+		refundUnlock: redis.NewScript(refundUnlockScript),
+	}
+}
+
+// PreProcess 執行原子化的 Lua 預處理，統一支援扣款 (DEBIT) 與加款 (CREDIT)。
+// op 使用 OpDebit 或 OpCredit 常數。
+// - DEBIT：鎖定防重、檢查餘額、原子扣款。
+// - CREDIT：鎖定防重（防止重複派彩）、原子加款，不做餘額下限檢查。
+// Cache Miss 時，無論哪種操作都保留鎖並回傳 ResultCacheMiss，讓 Go 層 fallthrough 到 DB。
+func (c *WalletCache) PreProcess(ctx context.Context, op, providerID, providerTxID string, userID int64, currency string, amount float64) (int, error) {
 	txLockKey := fmt.Sprintf("tx:%s:%s", providerID, providerTxID)
 	walletKey := fmt.Sprintf("wallet:%d:%s", userID, currency)
 
 	keys := []string{txLockKey, walletKey}
-	args := []any{"BET", amount}
+	args := []any{op, amount}
 
-	result, err := c.preDeduct.Run(ctx, c.client, keys, args...).Int()
+	result, err := c.preProcess.Run(ctx, c.client, keys, args...).Int()
 	if err != nil {
-		return -1, fmt.Errorf("redis script run failed: %w", err)
+		return -1, fmt.Errorf("redis pre-process script run failed: %w", err)
 	}
 
 	return result, nil
@@ -82,4 +92,3 @@ func (c *WalletCache) RefundAndUnlock(ctx context.Context, userID int64, currenc
 
 	return nil
 }
-

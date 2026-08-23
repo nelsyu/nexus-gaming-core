@@ -48,40 +48,40 @@ func (u *walletUsecase) ProcessTransaction(ctx context.Context, req *domain.Tran
 		return nil, fmt.Errorf("amount must be positive")
 	}
 
-	// 2. Redis Fast-path 預扣款與防重鎖
-	if req.Type == domain.TxTypeBet {
-		amountFloat, _ := req.Amount.Float64()
-		result, err := u.cache.PreDeduct(ctx, req.ProviderID, req.ProviderTxID, req.UserID, req.Currency, amountFloat)
-		if err != nil {
-			// 如果 Redis 掛了，我們可以選擇 Fallback 降級回原本的純 DB 模式，這邊為了展示先報錯
-			return nil, fmt.Errorf("redis pre-deduct failed: %w", err)
-		}
+	// 2. Redis Fast-path：統一處理所有交易類型的防重鎖與餘額預處理
+	// DEBIT：原子驗證餘額並預扣，Cache Miss 時 fallthrough 到 DB
+	// CREDIT：原子加款，防止重複派彩，Cache Miss 時 fallthrough 到 DB
+	var redisOp string
+	switch req.Type {
+	case domain.TxTypeBet, domain.TxTypeWithdraw:
+		redisOp = redis.OpDebit
+	case domain.TxTypeWin, domain.TxTypeDeposit, domain.TxTypeRefund:
+		redisOp = redis.OpCredit
+	default:
+		return nil, fmt.Errorf("unknown transaction type: %s", req.Type)
+	}
 
-		switch result {
-		case redis.ResultDuplicateTx:
-			// 鎖已存在，代表這筆交易處理過或是正在處理，避免去打 DB
-			// 為了完全符合冪等性，理想上要從 DB 把歷史資料查出來還給他，或是直接回傳 409
-			existingTx, err := u.txR.GetByProviderTxID(ctx, req.ProviderID, req.ProviderTxID)
-			if err != nil || existingTx == nil {
-				return nil, fmt.Errorf("concurrent request blocked by redis lock")
-			}
-			return existingTx, nil
-		case redis.ResultInsufficient:
-			return nil, domain.ErrInsufficientFunds
-		case redis.ResultCacheMiss:
-			// 快取沒有餘額資料，繼續往下走打 DB，後續落庫成功再回補快取
-		case redis.ResultSuccess:
-			// 預扣款成功，繼續往下走完成 DB 最終落庫
-		}
-	} else {
-		// 對於非 BET 的交易 (例如 WIN 派彩)，我們可以直接檢查 DB 或加上獨立的鎖，這邊簡化先只做 BET
+	amountFloat, _ := req.Amount.Float64()
+	result, err := u.cache.PreProcess(ctx, redisOp, req.ProviderID, req.ProviderTxID, req.UserID, req.Currency, amountFloat)
+	if err != nil {
+		// 如果 Redis 掛了，可以選擇 Fallback 降級回純 DB 模式，這邊為了展示先報錯
+		return nil, fmt.Errorf("redis pre-process failed: %w", err)
+	}
+
+	switch result {
+	case redis.ResultDuplicateTx:
+		// 鎖已存在，代表這筆交易已處理過或正在處理，直接從 DB 查出歷史資料回傳
 		existingTx, err := u.txR.GetByProviderTxID(ctx, req.ProviderID, req.ProviderTxID)
-		if err != nil {
-			return nil, fmt.Errorf("check existing transaction failed: %w", err)
+		if err != nil || existingTx == nil {
+			return nil, fmt.Errorf("concurrent request blocked by redis lock")
 		}
-		if existingTx != nil {
-			return existingTx, nil
-		}
+		return existingTx, nil
+	case redis.ResultInsufficient:
+		return nil, domain.ErrInsufficientFunds
+	case redis.ResultCacheMiss:
+		// 快取沒有餘額資料，繼續往下走打 DB，落庫成功後 InitCacheIfMissing 補種
+	case redis.ResultSuccess:
+		// 預處理成功（DEBIT 已預扣 / CREDIT 已加款），繼續往下完成 DB 最終落庫
 	}
 
 	// 3. 開啟資料庫事務 (DB Transaction)
@@ -159,19 +159,17 @@ func (u *walletUsecase) ProcessTransaction(ctx context.Context, req *domain.Tran
 
 	// 8. 提交事務
 	if err := sqlxTx.Commit(); err != nil {
-		// 走到這裡通常是很嚴重的系統異常，此時 Redis 已經預扣了，DB 卻沒寫入。
-		// 透過 RabbitMQ 發送補償事件，交由 Worker 去執行 Redis 退款並移除防重鎖，確保最終一致性。
-		if req.Type == domain.TxTypeBet {
-			// 發送補償事件到 RabbitMQ
-			_ = u.pub.PublishCompensationEvent(context.Background(), &domain.CompensationEvent{
-				ProviderID:   req.ProviderID,
-				ProviderTxID: req.ProviderTxID,
-				UserID:       req.UserID,
-				Currency:     req.Currency,
-				Amount:       req.Amount, // 需要補回的金額
-				Timestamp:    time.Now(),
-			})
-		}
+		// 走到這裡通常是很嚴重的系統異常，此時 Redis 已經預處理了，DB 卻沒寫入。
+		// 透過 RabbitMQ 發送補償事件，交由 Worker 去執行 Redis 逆向補償並移除防重鎖，確保最終一致性。
+		_ = u.pub.PublishCompensationEvent(context.Background(), &domain.CompensationEvent{
+			ProviderID:   req.ProviderID,
+			ProviderTxID: req.ProviderTxID,
+			UserID:       req.UserID,
+			Currency:     req.Currency,
+			Type:         req.Type,
+			Amount:       req.Amount,
+			Timestamp:    time.Now(),
+		})
 		return nil, fmt.Errorf("commit transaction failed: %w", err)
 	}
 

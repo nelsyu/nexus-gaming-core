@@ -20,13 +20,14 @@ type TransactionCompletedEvent struct {
 	Timestamp     time.Time       `json:"timestamp"`
 }
 
-// CompensationEvent 表示一筆交易在 Redis 預扣成功但 DB 落庫失敗，需要進行非同步補償的事件
+// CompensationEvent 表示一筆交易在 Redis 預處理成功但 DB 落庫失敗，需要進行非同步補償的事件
 type CompensationEvent struct {
 	ProviderID   string          `json:"provider_id"`
 	ProviderTxID string          `json:"provider_tx_id"`
 	UserID       int64           `json:"user_id"`
 	Currency     string          `json:"currency"`
-	Amount       decimal.Decimal `json:"amount"` // 需要補回的金額
+	Type         TransactionType `json:"type"`   // 用於判斷補償方向：Debit 補加、Credit 補扣
+	Amount       decimal.Decimal `json:"amount"` // 需要補償的金額
 	Timestamp    time.Time       `json:"timestamp"`
 }
 
