@@ -10,6 +10,7 @@ services:
       - "5432:5432"
     volumes:
       - ./scripts:/docker-entrypoint-initdb.d
+      - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
 
   redis-master:
@@ -70,6 +71,8 @@ services:
     ports:
       - "5672:5672"
       - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
     restart: unless-stopped
 
   worker:
@@ -83,3 +86,6 @@ services:
       - redis-sentinel
       - rabbitmq
     restart: unless-stopped
+volumes:
+  rabbitmq_data:
+  postgres_data:
