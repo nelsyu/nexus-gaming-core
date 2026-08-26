@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"os"
 
 	nexushttp "github.com/bosstest/nexus-core/internal/delivery/http"
@@ -9,18 +8,20 @@ import (
 	"github.com/bosstest/nexus-core/internal/infrastructure/rabbitmq"
 	"github.com/bosstest/nexus-core/internal/infrastructure/redis"
 	"github.com/bosstest/nexus-core/internal/usecase"
+	"github.com/bosstest/nexus-core/pkg/logger"
 	"github.com/joho/godotenv"
+	"go.uber.org/zap"
 )
 
 func main() {
 	// 1. 讀取環境變數
 	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found, relying on environment variables")
+		logger.GetLogger().Info("No .env file found, relying on environment variables")
 	}
 
 	dsn := os.Getenv("DB_DSN")
 	if dsn == "" {
-		log.Fatal("DB_DSN environment variable is required")
+		logger.GetLogger().Fatal("DB_DSN environment variable is required")
 	}
 
 	port := os.Getenv("PORT")
@@ -40,7 +41,7 @@ func main() {
 	// 2. 初始化資料庫連線
 	db, err := postgres.InitDB(dsn)
 	if err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
+		logger.GetLogger().Fatal("Failed to initialize database", zap.Error(err))
 	}
 	defer db.Close()
 
@@ -56,7 +57,7 @@ func main() {
 	}
 	rmqClient, err := rabbitmq.InitRabbitMQ(rabbitMQUrl)
 	if err != nil {
-		log.Fatalf("Failed to initialize RabbitMQ: %v", err)
+		logger.GetLogger().Fatal("Failed to initialize RabbitMQ", zap.Error(err))
 	}
 	defer rmqClient.Close()
 	eventPublisher := rabbitmq.NewEventPublisher(rmqClient)
@@ -77,8 +78,8 @@ func main() {
 	router := nexushttp.SetupRouter(walletHandler)
 
 	// 7. 啟動伺服器
-	log.Printf("Nexus-Core Server starting on port %s...", port)
+	logger.GetLogger().Info("Nexus-Core Server starting...", zap.String("port", port))
 	if err := router.Run(":" + port); err != nil {
-		log.Fatalf("Failed to run server: %v", err)
+		logger.GetLogger().Fatal("Failed to run server", zap.Error(err))
 	}
 }

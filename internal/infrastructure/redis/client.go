@@ -2,10 +2,11 @@ package redis
 
 import (
 	"context"
-	"log"
 	"strings"
 
+	"github.com/bosstest/nexus-core/pkg/logger"
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 )
 
 // InitSentinelClient 初始化並回傳一個 Redis Sentinel 連線池
@@ -20,8 +21,9 @@ func InitSentinelClient(sentinelAddrs string, masterName string) *redis.Client {
 	})
 
 	// 測試連線
-	if err := rdb.Ping(context.Background()).Err(); err != nil {
-		log.Fatalf("Failed to connect to Redis Sentinel: %v", err)
+	ctx := context.Background()
+	if _, err := rdb.Ping(ctx).Result(); err != nil {
+		logger.GetLogger().Fatal("Failed to connect to Redis Sentinel", zap.Error(err))
 	}
 
 	return rdb

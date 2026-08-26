@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -11,9 +10,11 @@ import (
 	"github.com/bosstest/nexus-core/internal/domain"
 	"github.com/bosstest/nexus-core/internal/infrastructure/rabbitmq"
 	"github.com/bosstest/nexus-core/internal/infrastructure/redis"
+	"github.com/bosstest/nexus-core/pkg/logger"
 	"github.com/joho/godotenv"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/shopspring/decimal"
+	"go.uber.org/zap"
 )
 
 func main() {
@@ -41,7 +42,7 @@ func main() {
 	// 2. 初始化 RabbitMQ
 	rmqClient, err := rabbitmq.InitRabbitMQ(rabbitMQUrl)
 	if err != nil {
-		log.Fatalf("Failed to initialize RabbitMQ: %v", err)
+		logger.GetLogger().Fatal("Failed to initialize RabbitMQ", zap.Error(err))
 	}
 	defer rmqClient.Close()
 
@@ -56,10 +57,10 @@ func main() {
 		nil,                // args
 	)
 	if err != nil {
-		log.Fatalf("Failed to register a consumer: %v", err)
+		logger.GetLogger().Fatal("Failed to register a consumer", zap.Error(err))
 	}
 
-	log.Println("[Worker] Started. Waiting for messages...")
+	logger.GetLogger().Info("Worker Started. Waiting for messages...")
 
 	// 4. 使用 Context 與 Channel 優雅關閉
 	ctx, cancel := context.WithCancel(context.Background())
@@ -84,14 +85,14 @@ func main() {
 	}()
 
 	<-sigChan
-	log.Println("[Worker] Shutting down gracefully...")
+	logger.GetLogger().Info("Shutting down gracefully...")
 }
 
 func processMessage(d amqp.Delivery, cache domain.WalletCache) {
 	if d.RoutingKey == rabbitmq.RoutingKeyComp {
 		var compEvent domain.CompensationEvent
 		if err := json.Unmarshal(d.Body, &compEvent); err != nil {
-			log.Printf("[Error] Failed to unmarshal compensation event: %v", err)
+			logger.GetLogger().Error("Failed to unmarshal compensation event", zap.Error(err))
 			_ = d.Reject(false)
 			return
 		}
@@ -107,20 +108,24 @@ func processMessage(d amqp.Delivery, cache domain.WalletCache) {
 
 		err := cache.RefundAndUnlock(context.Background(), compEvent.UserID, compEvent.Currency, compEvent.ProviderID, compEvent.ProviderTxID, compensationAmount)
 		if err != nil {
-			log.Printf("[Worker] ❌ Failed to revert Redis balance: %v", err)
+			logger.GetLogger().Error("Failed to revert Redis balance", zap.Error(err))
 			_ = d.Nack(false, true) // 重試
 			return
 		}
 
-		log.Printf("[Worker] 🔧 Compensation done: Type=%s, User=%d, ProviderTxID=%s, Amount=%s",
-			compEvent.Type, compEvent.UserID, compEvent.ProviderTxID, compEvent.Amount.String())
+		logger.GetLogger().Info("Compensation done",
+			zap.String("type", string(compEvent.Type)),
+			zap.Int64("user_id", compEvent.UserID),
+			zap.String("provider_tx_id", compEvent.ProviderTxID),
+			zap.String("amount", compEvent.Amount.String()),
+		)
 		_ = d.Ack(false)
 		return
 	}
 
 	var event domain.TransactionCompletedEvent
 	if err := json.Unmarshal(d.Body, &event); err != nil {
-		log.Printf("[Error] Failed to unmarshal message, discarding: %v", err)
+		logger.GetLogger().Error("Failed to unmarshal message, discarding", zap.Error(err))
 		_ = d.Reject(false) // 格式錯誤，不要重試，直接丟掉或進 DLQ
 		return
 	}
@@ -128,12 +133,16 @@ func processMessage(d amqp.Delivery, cache domain.WalletCache) {
 	// [人為模擬錯誤]：如果金額是 999，我們模擬處理失敗，將訊息 Nack 且不重新入隊 (requeue=false)
 	// 這樣 RabbitMQ 就會自動根據我們在宣告時綁定的設定，把它踢進 Dead Letter Queue (DLQ)
 	if event.Amount.Equal(decimal.NewFromInt(999)) {
-		log.Printf("[Worker] 🛑 Simulated Error: Rejecting transaction %s (Amount: 999), moving to DLQ...", event.TransactionID)
+		logger.GetLogger().Warn("Simulated Error: Rejecting transaction, moving to DLQ...", zap.String("transaction_id", event.TransactionID))
 		_ = d.Nack(false, false)
 		return
 	}
 
 	// 模擬正常的業務處理 (如：寫報表、算返水)
-	log.Printf("[Worker] ✅ Successfully processed event: TxID=%s, UserID=%d, Amount=%s", event.TransactionID, event.UserID, event.Amount.String())
+	logger.GetLogger().Info("Successfully processed event",
+		zap.String("transaction_id", event.TransactionID),
+		zap.Int64("user_id", event.UserID),
+		zap.String("amount", event.Amount.String()),
+	)
 	_ = d.Ack(false)
 }

@@ -2,7 +2,7 @@ package rabbitmq
 
 import (
 	"fmt"
-	"log"
+	"github.com/bosstest/nexus-core/pkg/logger"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -76,7 +76,8 @@ func InitRabbitMQ(url string) (*Client, error) {
 		return nil, fmt.Errorf("failed to bind main queue for comp: %w", err)
 	}
 
-	log.Println("Successfully connected to RabbitMQ and configured DLQ")
+	logger.GetLogger().Info("Successfully connected to RabbitMQ and configured DLQ")
+
 	return &Client{
 		Conn:    conn,
 		Channel: ch,

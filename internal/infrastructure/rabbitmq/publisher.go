@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 
 	"github.com/bosstest/nexus-core/internal/domain"
+	"github.com/bosstest/nexus-core/pkg/logger"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.uber.org/zap"
 )
 
 type EventPublisher struct {
@@ -41,7 +42,7 @@ func (p *EventPublisher) PublishTransactionCompleted(ctx context.Context, event 
 		return fmt.Errorf("failed to publish message: %w", err)
 	}
 
-	log.Printf("[Publisher] Sent TransactionCompletedEvent: txID=%s", event.TransactionID)
+	logger.GetLogger().Info("Sent TransactionCompletedEvent", zap.String("txID", event.TransactionID))
 	return nil
 }
 
@@ -66,6 +67,6 @@ func (p *EventPublisher) PublishCompensationEvent(ctx context.Context, event *do
 		return fmt.Errorf("failed to publish compensation message: %w", err)
 	}
 
-	log.Printf("[Publisher] Sent CompensationEvent for ProviderTxID=%s", event.ProviderTxID)
+	logger.GetLogger().Info("Sent CompensationEvent", zap.String("providerTxID", event.ProviderTxID))
 	return nil
 }

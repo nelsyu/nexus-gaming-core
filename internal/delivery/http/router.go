@@ -2,11 +2,21 @@ package http
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // SetupRouter 註冊所有的 API 路由
 func SetupRouter(walletHandler *WalletHandler) *gin.Engine {
-	r := gin.Default()
+	r := gin.New()
+
+	// 註冊全域 Middleware
+	r.Use(gin.Recovery()) // 捕捉 Panic
+	r.Use(TraceMiddleware())
+	r.Use(LoggerMiddleware())
+	r.Use(MetricsMiddleware())
+
+	// Prometheus Metrics 端點
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	// 簡單的健康檢查端點
 	r.GET("/health", func(c *gin.Context) {
