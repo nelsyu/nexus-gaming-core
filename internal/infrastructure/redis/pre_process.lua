@@ -15,9 +15,10 @@ redis.call('EXPIRE', txLockKey, 300)
 -- 2. 檢查錢包是否存在於 Redis
 local currentBalanceStr = redis.call('HGET', walletKey, 'balance')
 if not currentBalanceStr then
-    -- Redis 沒有快取，通知 Go 去查 DB。
-    -- 注意：這裡刻意「不刪除」防重鎖，確保 Go 走 DB 期間不會有並發請求重複執行。
-    return 3 -- 快取未擊中 (Cache Miss)，鎖已持有
+    -- 快取未擊中 (Cache Miss)，主動刪除防重鎖。
+    -- 讓 Go 層在等待快取重建完成後，可以進行一次乾淨的 PreProcess 重試。
+    redis.call('DEL', txLockKey)
+    return 3 
 end
 
 -- 3. 根據操作類型執行對應的餘額變更

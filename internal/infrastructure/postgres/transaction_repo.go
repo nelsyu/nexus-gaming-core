@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/bosstest/nexus-core/internal/domain"
+	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jmoiron/sqlx"
 )
@@ -47,9 +48,9 @@ func (r *transactionRepo) CreateTransaction(ctx context.Context, tx *domain.Tran
 	).Scan(&tx.ID, &tx.CreatedAt)
 
 	if err != nil {
-		// 檢查是否為 PostgreSQL Unique Constraint 違反錯誤 (23505)
+		// 檢查是否為 PostgreSQL Unique Constraint 違反錯誤
 		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
 			return domain.ErrDuplicateTransaction
 		}
 		return err

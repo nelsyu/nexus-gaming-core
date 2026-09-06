@@ -50,6 +50,10 @@ type WalletCache interface {
 	PreProcess(ctx context.Context, op, providerID, providerTxID string, userID int64, currency string, amount float64) (int, error)
 	InitCacheIfMissing(ctx context.Context, userID int64, currency string, balance float64) error
 	RefundAndUnlock(ctx context.Context, userID int64, currency, providerID, providerTxID string, amount float64) error
+
+	// 分散式快取重建鎖 (Hydration Lock)
+	AcquireHydrationLock(ctx context.Context, userID int64) (bool, error)
+	ReleaseHydrationLock(ctx context.Context, userID int64) error
 }
 
 // UnitOfWork 封裝了資料庫交易邊界

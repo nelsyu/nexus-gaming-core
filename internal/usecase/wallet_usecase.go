@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/bosstest/nexus-core/internal/domain"
@@ -60,27 +61,80 @@ func (u *walletUsecase) ProcessTransaction(ctx context.Context, req *domain.Tran
 	}
 
 	amountFloat, _ := req.Amount.Float64()
-	result, err := u.cache.PreProcess(ctx, redisOp, req.ProviderID, req.ProviderTxID, req.UserID, req.Currency, amountFloat)
-	if err != nil {
-		// 如果 Redis 掛了，可以選擇 Fallback 降級回純 DB 模式，這邊為了展示先報錯
-		return nil, fmt.Errorf("redis pre-process failed: %w", err)
+
+	var result int
+	var err error
+	var hydrationLocked bool
+	maxRetries := 50 // 最高等待約 2.5 秒 (50 * 50ms)
+
+	for range maxRetries {
+		result, err = u.cache.PreProcess(ctx, redisOp, req.ProviderID, req.ProviderTxID, req.UserID, req.Currency, amountFloat)
+		if err != nil {
+			return nil, fmt.Errorf("redis pre-process failed: %w", err)
+		}
+
+		if result != domain.ResultCacheMiss {
+			// 如果不是 CacheMiss，直接跳出迴圈繼續處理
+			break
+		}
+
+		// 遇到 Cache Miss，嘗試爭搶 Hydration Lock
+		hydrationLocked, err = u.cache.AcquireHydrationLock(ctx, req.UserID)
+		if err != nil {
+			return nil, fmt.Errorf("acquire hydration lock failed: %w", err)
+		}
+
+		if hydrationLocked {
+			// 搶到鎖！由我們負責去查 DB 並重建快取。
+			// 使用 defer 確保無論如何 (即使 panic) 都會釋放鎖
+			defer u.cache.ReleaseHydrationLock(context.Background(), req.UserID)
+			break // 跳出迴圈，進入查 DB 的流程
+		}
+
+		// 沒搶到鎖，代表別人正在查 DB。我們進入間隔重試 + 隨機抖動 (Jitter) 的等待。
+		// 基本等待 50ms，加上 0~20ms 的隨機抖動，避免驚群效應。
+		jitter := time.Duration(rand.Intn(20)) * time.Millisecond
+		time.Sleep(50*time.Millisecond + jitter)
+	}
+
+	// 迴圈結束後，如果還是 CacheMiss 且我們沒有取得鎖，代表系統繁忙或鎖卡住了
+	if result == domain.ResultCacheMiss && !hydrationLocked {
+		return nil, fmt.Errorf("server busy: failed to acquire hydration lock after retries")
 	}
 
 	switch result {
 	case domain.ResultDuplicateTx:
 		// 鎖已存在，代表這筆交易已處理過或正在處理，直接從 DB 查出歷史資料回傳
-		existingTx, err := u.txR.GetByProviderTxID(ctx, req.ProviderID, req.ProviderTxID)
-		if err != nil || existingTx == nil {
+		existingTx, getErr := u.txR.GetByProviderTxID(ctx, req.ProviderID, req.ProviderTxID)
+		if getErr != nil || existingTx == nil {
 			return nil, fmt.Errorf("concurrent request blocked by redis lock")
 		}
 		return existingTx, nil
 	case domain.ResultInsufficient:
 		return nil, domain.ErrInsufficientFunds
 	case domain.ResultCacheMiss:
-		// 快取沒有餘額資料，繼續往下走打 DB，落庫成功後 InitCacheIfMissing 補種
+		// 快取沒有餘額資料且已取得 Hydration Lock，繼續往下走打 DB，落庫成功後 InitCacheIfMissing 補種
 	case domain.ResultSuccess:
 		// 預處理成功（DEBIT 已預扣 / CREDIT 已加款），繼續往下完成 DB 最終落庫
 	}
+
+	// 透過 defer 攔截 Panic。若 DB 操作階段發生 Panic，連線會中斷 (回滾)，
+	// 但 Redis 的餘額與鎖已經被修改了。此時必須盡最大努力送出補償事件給 RabbitMQ。
+	defer func() {
+		if r := recover(); r != nil {
+			// 在 Panic 時使用獨立的 Background Context，避免原始 Context 一併被取消
+			_ = u.pub.PublishCompensationEvent(context.Background(), &domain.CompensationEvent{
+				ProviderID:   req.ProviderID,
+				ProviderTxID: req.ProviderTxID,
+				UserID:       req.UserID,
+				Currency:     req.Currency,
+				Type:         req.Type,
+				Amount:       req.Amount,
+				Timestamp:    time.Now(),
+			})
+			panic(r) // 重新丟出 Panic 讓 Gin Middleware (Recovery) 處理並回傳 500
+		}
+	}()
 
 	var newTx *domain.Transaction
 	var wallet *domain.Wallet
@@ -164,7 +218,7 @@ func (u *walletUsecase) ProcessTransaction(ctx context.Context, req *domain.Tran
 				Timestamp:    time.Now(),
 			})
 		}
-		
+
 		return nil, fmt.Errorf("process transaction failed: %w", err)
 	}
 

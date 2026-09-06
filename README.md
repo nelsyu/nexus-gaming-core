@@ -16,7 +16,8 @@ Nexus Gaming Core 是一個為高併發遊戲場景設計的**錢包與金流核
 - **Clean Architecture (乾淨架構)**：嚴格遵守依賴反轉原則，由外而內分為 Delivery (HTTP/Gin)、Infrastructure (Postgres/Redis/RabbitMQ)、Usecase (業務邏輯) 與 Domain (核心實體與介面)，並導入 `UnitOfWork` 模式封裝資料庫交易。
 - **高併發與防重 (High Concurrency & Idempotency)**：
   - 第一道防線：透過 Redis Lua Script 達到原子級的餘額預扣與防重鎖 (Distributed Lock)。
-  - 第二道防線：PostgreSQL 悲觀鎖 (`SELECT FOR UPDATE`) 確保底層資料強一致。
+  - 第二道防線：**分散式快取重建鎖 (Hydration Lock)**，配合 Jitter Polling 間隔重試，完美防止 Cache Stampede (快取擊穿/驚群效應)。
+  - 第三道防線：PostgreSQL 悲觀鎖 (`SELECT FOR UPDATE`) 確保底層資料強一致。
 - **非同步補償機制 (Asynchronous Compensation)**：當資料庫 Commit 失敗或網路斷線時，系統會送出 `CompensationEvent` 到 RabbitMQ，由背景 Worker 進行 Redis 餘額逆向補償，確保資料最終一致。
 - **全面可觀測性 (Comprehensive Observability)**：
   - **Metrics (Prometheus)**：內建 Prometheus Exporter 收集 API QPS、Latency (P99)、HTTP 狀態碼。

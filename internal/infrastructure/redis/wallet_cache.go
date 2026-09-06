@@ -80,3 +80,16 @@ func (c *WalletCache) RefundAndUnlock(ctx context.Context, userID int64, currenc
 
 	return nil
 }
+
+// AcquireHydrationLock 嘗試取得快取重建鎖，避免 Cache Stampede。
+func (c *WalletCache) AcquireHydrationLock(ctx context.Context, userID int64) (bool, error) {
+	key := fmt.Sprintf("hydration_lock:%d", userID)
+	// 5 秒 TTL 足夠應付一次資料庫讀取，也能防止 Worker 崩潰導致死鎖
+	return c.client.SetNX(ctx, key, "1", 5*time.Second).Result()
+}
+
+// ReleaseHydrationLock 釋放快取重建鎖
+func (c *WalletCache) ReleaseHydrationLock(ctx context.Context, userID int64) error {
+	key := fmt.Sprintf("hydration_lock:%d", userID)
+	return c.client.Del(ctx, key).Err()
+}
