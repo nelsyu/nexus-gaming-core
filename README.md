@@ -83,6 +83,12 @@ make db-up
    ```
 3. 在終端機與 Grafana 儀表板上觀察 QPS、錯誤率以及 P99 延遲！
 
+### 執行單元測試 (Running Unit Tests)
+系統內建了針對核心業務邏輯 (`usecase`) 的嚴格單元測試，涵蓋了「資料庫 Panic 時的 RabbitMQ 事件補償」與「Redis 快取擊穿時的 Hydration Lock 重試機制」等極端邊界條件。
+```bash
+go test ./internal/usecase -v
+```
+
 ## 📁 目錄結構
 
 ```text
