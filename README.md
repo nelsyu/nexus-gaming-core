@@ -50,6 +50,13 @@ graph TD
 - [Docker](https://docs.docker.com/get-docker/) & Docker Compose
 - [Make](https://www.gnu.org/software/make/) (Windows 可使用 Git Bash 或 WSL)
 
+### 環境變數設定
+本專案嚴格遵守 Twelve-Factor App 標準，將敏感設定儲存於 `.env` 中。在啟動前，請先複製範例檔：
+```bash
+cp .env.example .env
+```
+(如果是 Windows PowerShell，請使用 `Copy-Item .env.example .env`)
+
 ### 啟動完整環境
 這會一次把 PostgreSQL, Redis Sentinel, RabbitMQ, API Server, Worker, Prometheus, Loki, Promtail 與 Grafana 啟動起來。
 ```bash

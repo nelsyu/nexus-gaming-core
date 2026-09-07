@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -29,4 +30,13 @@ type Transaction struct {
 	ProviderTxID  string          `json:"provider_tx_id" db:"provider_tx_id"` // 第三方遊戲商傳來的唯一交易序號 (用於防重)
 	ReferenceID   string          `json:"reference_id" db:"reference_id"`   // 關聯的注單ID或其他參考ID
 	CreatedAt     time.Time       `json:"created_at" db:"created_at"`
+}
+
+// TransactionRepository 定義了交易流水帳的儲存庫介面
+type TransactionRepository interface {
+	// 新增一筆流水帳
+	CreateTransaction(ctx context.Context, tx *Transaction) error
+
+	// 透過第三方交易 ID 查詢是否已存在 (防重檢查)
+	GetByProviderTxID(ctx context.Context, providerID, providerTxID string) (*Transaction, error)
 }

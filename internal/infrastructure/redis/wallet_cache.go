@@ -17,7 +17,7 @@ var preProcessScript string
 var refundUnlockScript string
 
 // WalletCache 實作了 domain.WalletCache 介面
-type WalletCache struct {
+type walletCache struct {
 	client       *redis.Client
 	preProcess   *redis.Script
 	refundUnlock *redis.Script
@@ -25,7 +25,7 @@ type WalletCache struct {
 
 // NewWalletCache 建立新的 WalletCache 實例
 func NewWalletCache(client *redis.Client) domain.WalletCache {
-	return &WalletCache{
+	return &walletCache{
 		client:       client,
 		preProcess:   redis.NewScript(preProcessScript),
 		refundUnlock: redis.NewScript(refundUnlockScript),
@@ -37,7 +37,7 @@ func NewWalletCache(client *redis.Client) domain.WalletCache {
 // - DEBIT：鎖定防重、檢查餘額、原子扣款。
 // - CREDIT：鎖定防重（防止重複派彩）、原子加款，不做餘額下限檢查。
 // Cache Miss 時，無論哪種操作都保留鎖並回傳 ResultCacheMiss，讓 Go 層 fallthrough 到 DB。
-func (c *WalletCache) PreProcess(ctx context.Context, op, providerID, providerTxID string, userID int64, currency string, amount float64) (int, error) {
+func (c *walletCache) PreProcess(ctx context.Context, op, providerID, providerTxID string, userID int64, currency string, amount float64) (int, error) {
 	txLockKey := fmt.Sprintf("tx:%s:%s", providerID, providerTxID)
 	walletKey := fmt.Sprintf("wallet:%d:%s", userID, currency)
 
@@ -55,7 +55,7 @@ func (c *WalletCache) PreProcess(ctx context.Context, op, providerID, providerTx
 // InitCacheIfMissing 將 DB 中的餘額寫入 Redis。
 // 使用 HSETNX 確保「只有在 Redis 完全沒有該 key 時才寫入」，
 // 避免覆寫其他並發進行中的 HINCRBYFLOAT 相對增減。
-func (c *WalletCache) InitCacheIfMissing(ctx context.Context, userID int64, currency string, balance float64) error {
+func (c *walletCache) InitCacheIfMissing(ctx context.Context, userID int64, currency string, balance float64) error {
 	walletKey := fmt.Sprintf("wallet:%d:%s", userID, currency)
 	success, err := c.client.HSetNX(ctx, walletKey, "balance", balance).Result()
 	if err == nil && success {
@@ -66,7 +66,7 @@ func (c *WalletCache) InitCacheIfMissing(ctx context.Context, userID int64, curr
 }
 
 // RefundAndUnlock 執行原子化的退款並移除防重鎖
-func (c *WalletCache) RefundAndUnlock(ctx context.Context, userID int64, currency, providerID, providerTxID string, amount float64) error {
+func (c *walletCache) RefundAndUnlock(ctx context.Context, userID int64, currency, providerID, providerTxID string, amount float64) error {
 	txLockKey := fmt.Sprintf("tx:%s:%s", providerID, providerTxID)
 	walletKey := fmt.Sprintf("wallet:%d:%s", userID, currency)
 
@@ -82,14 +82,14 @@ func (c *WalletCache) RefundAndUnlock(ctx context.Context, userID int64, currenc
 }
 
 // AcquireHydrationLock 嘗試取得快取重建鎖，避免 Cache Stampede。
-func (c *WalletCache) AcquireHydrationLock(ctx context.Context, userID int64) (bool, error) {
+func (c *walletCache) AcquireHydrationLock(ctx context.Context, userID int64) (bool, error) {
 	key := fmt.Sprintf("hydration_lock:%d", userID)
 	// 5 秒 TTL 足夠應付一次資料庫讀取，也能防止 Worker 崩潰導致死鎖
 	return c.client.SetNX(ctx, key, "1", 5*time.Second).Result()
 }
 
 // ReleaseHydrationLock 釋放快取重建鎖
-func (c *WalletCache) ReleaseHydrationLock(ctx context.Context, userID int64) error {
+func (c *walletCache) ReleaseHydrationLock(ctx context.Context, userID int64) error {
 	key := fmt.Sprintf("hydration_lock:%d", userID)
 	return c.client.Del(ctx, key).Err()
 }

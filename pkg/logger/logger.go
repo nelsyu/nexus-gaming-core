@@ -3,6 +3,7 @@ package logger
 import (
 	"context"
 	"os"
+	"sync"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -13,23 +14,28 @@ type contextKey string
 
 const TraceIDKey contextKey = "trace_id"
 
-var globalLogger *zap.Logger
+var (
+	globalLogger *zap.Logger
+	once         sync.Once
+)
 
 // InitLogger 初始化全域 Zap logger
 func InitLogger() {
-	encoderConfig := zap.NewProductionEncoderConfig()
-	encoderConfig.TimeKey = "timestamp"
-	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+	once.Do(func() {
+		encoderConfig := zap.NewProductionEncoderConfig()
+		encoderConfig.TimeKey = "timestamp"
+		encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 
-	// 使用 JSON 編碼器，方便整合到 ELK 或其他 Log 系統
-	core := zapcore.NewCore(
-		zapcore.NewJSONEncoder(encoderConfig),
-		zapcore.AddSync(os.Stdout),
-		zap.InfoLevel,
-	)
+		// 使用 JSON 編碼器，方便整合到 ELK 或其他 Log 系統
+		core := zapcore.NewCore(
+			zapcore.NewJSONEncoder(encoderConfig),
+			zapcore.AddSync(os.Stdout),
+			zap.InfoLevel,
+		)
 
-	globalLogger = zap.New(core, zap.AddCaller())
-	zap.ReplaceGlobals(globalLogger)
+		globalLogger = zap.New(core, zap.AddCaller())
+		zap.ReplaceGlobals(globalLogger)
+	})
 }
 
 // GetLogger 回傳全域 logger 實例

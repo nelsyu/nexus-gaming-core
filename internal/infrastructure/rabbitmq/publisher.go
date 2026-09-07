@@ -11,17 +11,17 @@ import (
 	"go.uber.org/zap"
 )
 
-type EventPublisher struct {
+type eventPublisher struct {
 	channel *amqp.Channel
 }
 
 func NewEventPublisher(client *Client) domain.EventPublisher {
-	return &EventPublisher{
+	return &eventPublisher{
 		channel: client.Channel,
 	}
 }
 
-func (p *EventPublisher) PublishTransactionCompleted(ctx context.Context, event *domain.TransactionCompletedEvent) error {
+func (p *eventPublisher) PublishTransactionCompleted(ctx context.Context, event *domain.TransactionCompletedEvent) error {
 	body, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("failed to marshal event: %w", err)
@@ -46,7 +46,7 @@ func (p *EventPublisher) PublishTransactionCompleted(ctx context.Context, event 
 	return nil
 }
 
-func (p *EventPublisher) PublishCompensationEvent(ctx context.Context, event *domain.CompensationEvent) error {
+func (p *eventPublisher) PublishCompensationEvent(ctx context.Context, event *domain.CompensationEvent) error {
 	body, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("failed to marshal compensation event: %w", err)
