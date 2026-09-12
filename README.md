@@ -57,10 +57,16 @@ cp .env.example .env
 ```
 (如果是 Windows PowerShell，請使用 `Copy-Item .env.example .env`)
 
-### 啟動完整環境
+### 啟動完整環境與資料庫 Migration
 這會一次把 PostgreSQL, Redis Sentinel, RabbitMQ, API Server, Worker, Prometheus, Loki, Promtail 與 Grafana 啟動起來。
 ```bash
 make db-up
+```
+接著，請安裝 goose CLI 工具，執行資料庫 Migration 建立資料表，最後匯入測試假資料：
+```bash
+make install-tools
+make migrate-up
+make seed
 ```
 
 ### 檢視 Grafana 儀表板與日誌

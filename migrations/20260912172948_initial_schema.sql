@@ -1,3 +1,4 @@
+-- +goose Up
 -- Users 表 (玩家或代理)
 CREATE TABLE IF NOT EXISTS users (
     id BIGSERIAL PRIMARY KEY,
@@ -41,3 +42,8 @@ CREATE TABLE IF NOT EXISTS transactions (
 CREATE INDEX idx_wallets_user_id ON wallets(user_id);
 CREATE INDEX idx_transactions_wallet_id ON transactions(wallet_id);
 CREATE INDEX idx_transactions_provider_tx_id ON transactions(provider_tx_id);
+
+-- +goose Down
+DROP TABLE IF EXISTS transactions;
+DROP TABLE IF EXISTS wallets;
+DROP TABLE IF EXISTS users;

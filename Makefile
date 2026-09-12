@@ -1,4 +1,4 @@
-.PHONY: all build run test clean db-up db-down test-load worker
+.PHONY: all build run test clean db-up db-down test-load worker install-tools migrate-up migrate-down migrate-status migrate-create seed
 
 all: build
 
@@ -31,3 +31,29 @@ RABBITMQ_URL ?= "amqp://guest:guest@localhost:5672/"
 
 worker:
 	RABBITMQ_URL=$(RABBITMQ_URL) go run cmd/worker/main.go
+
+# 資料庫 Migration 與 Seed 指令
+DATABASE_URL ?= "postgres://postgres:postgres@localhost:5432/nexus_db?sslmode=disable"
+
+install-tools:
+	go install github.com/pressly/goose/v3/cmd/goose@latest
+
+GOOSE_CMD ?= go run github.com/pressly/goose/v3/cmd/goose@latest
+
+migrate-up:
+	$(GOOSE_CMD) -dir migrations postgres $(DATABASE_URL) up
+
+migrate-down:
+	$(GOOSE_CMD) -dir migrations postgres $(DATABASE_URL) down
+
+migrate-status:
+	$(GOOSE_CMD) -dir migrations postgres $(DATABASE_URL) status
+
+migrate-create:
+ifndef name
+	$(error name is required. Usage: make migrate-create name=xxx)
+endif
+	$(GOOSE_CMD) -dir migrations postgres $(DATABASE_URL) create $(name) sql
+
+seed:
+	docker exec -i nexus_db psql -U postgres -d nexus_db < scripts/seed.sql
