@@ -9,4 +9,11 @@ var (
 	ErrDuplicateTransaction = errors.New("duplicate transaction") // 冪等性防重複
 	ErrOptimisticLock       = errors.New("optimistic lock error") // 併發更新衝突
 	ErrCommitFailed         = errors.New("commit transaction failed")
+	ErrUserAlreadyExists    = errors.New("user already exists")
+	ErrInvalidCredentials   = errors.New("invalid username or password")
+	ErrInvalidToken         = errors.New("invalid token")
+	ErrTokenExpired         = errors.New("token has expired")
+	ErrTokenRevoked         = errors.New("token has been revoked")
+	ErrUnauthorized         = errors.New("unauthorized")
+	ErrForbidden            = errors.New("forbidden")
 )
