@@ -122,7 +122,7 @@ func Test_ProcessTransaction_CacheMiss_RetrySuccess(t *testing.T) {
 	mockCache.EXPECT().PreProcess(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(domain.ResultCacheMiss, nil)
 	
 	// 第一次嘗試：取得鎖失敗 (其他請求正在重建快取)
-	mockCache.EXPECT().AcquireHydrationLock(gomock.Any(), int64(1)).Return(false, nil)
+	mockCache.EXPECT().AcquireHydrationLock(gomock.Any(), int64(1)).Return("", false, nil)
 
 	// 第二次嘗試：重試 PreProcess 成功 (快取已被重建)
 	mockCache.EXPECT().PreProcess(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(domain.ResultSuccess, nil)
@@ -172,7 +172,7 @@ func Test_ProcessTransaction_CacheMiss_Timeout(t *testing.T) {
 
 	// 模擬一直拿不到 Hydration Lock，迴圈 50 次都會失敗
 	mockCache.EXPECT().PreProcess(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(domain.ResultCacheMiss, nil).Times(50)
-	mockCache.EXPECT().AcquireHydrationLock(gomock.Any(), int64(1)).Return(false, nil).Times(50)
+	mockCache.EXPECT().AcquireHydrationLock(gomock.Any(), int64(1)).Return("", false, nil).Times(50)
 
 	_, err := uc.ProcessTransaction(context.Background(), req)
 	require.ErrorContains(t, err, "server busy: failed to acquire hydration lock after retries")
@@ -287,8 +287,8 @@ func Test_ProcessTransaction_HydrationPathDBFails_NoInvalidate(t *testing.T) {
 	req := &domain.TransactionRequest{UserID: 1, Currency: "TWD", Type: domain.TxTypeBet, Amount: decimal.NewFromInt(100)}
 
 	mockCache.EXPECT().PreProcess(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(domain.ResultCacheMiss, nil)
-	mockCache.EXPECT().AcquireHydrationLock(gomock.Any(), int64(1)).Return(true, nil)
-	mockCache.EXPECT().ReleaseHydrationLock(gomock.Any(), int64(1)).Return(nil)
+	mockCache.EXPECT().AcquireHydrationLock(gomock.Any(), int64(1)).Return("my-token", true, nil)
+	mockCache.EXPECT().ReleaseHydrationLock(gomock.Any(), int64(1), "my-token").Return(nil)
 	mockUoW.EXPECT().DoTx(gomock.Any(), gomock.Any()).Return(domain.ErrWalletNotFound)
 
 	_, err := uc.ProcessTransaction(context.Background(), req)
@@ -302,8 +302,8 @@ func Test_ProcessTransaction_HydrationPathSuccess_RebuildsCache(t *testing.T) {
 	req := &domain.TransactionRequest{UserID: 1, Currency: "TWD", Type: domain.TxTypeBet, Amount: decimal.RequireFromString("100.5"), ProviderID: "pgsoft", ProviderTxID: "tx1"}
 
 	mockCache.EXPECT().PreProcess(gomock.Any(), "DEBIT", "pgsoft", "tx1", int64(1), "TWD", int64(1_005_000)).Return(domain.ResultCacheMiss, nil)
-	mockCache.EXPECT().AcquireHydrationLock(gomock.Any(), int64(1)).Return(true, nil)
-	mockCache.EXPECT().ReleaseHydrationLock(gomock.Any(), int64(1)).Return(nil)
+	mockCache.EXPECT().AcquireHydrationLock(gomock.Any(), int64(1)).Return("my-token", true, nil)
+	mockCache.EXPECT().ReleaseHydrationLock(gomock.Any(), int64(1), "my-token").Return(nil)
 
 	mockUoW.EXPECT().DoTx(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, fn func(context.Context) error) error {
 		return fn(ctx)
@@ -330,9 +330,9 @@ func Test_ProcessTransaction_CacheMissWait_RespectsContextCancel(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	mockCache.EXPECT().PreProcess(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(domain.ResultCacheMiss, nil)
-	mockCache.EXPECT().AcquireHydrationLock(gomock.Any(), int64(1)).DoAndReturn(func(context.Context, int64) (bool, error) {
+	mockCache.EXPECT().AcquireHydrationLock(gomock.Any(), int64(1)).DoAndReturn(func(context.Context, int64) (string, bool, error) {
 		cancel() // 模擬客戶端在等待前斷線
-		return false, nil
+		return "", false, nil
 	})
 
 	_, err := uc.ProcessTransaction(ctx, req)

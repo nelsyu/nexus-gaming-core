@@ -192,12 +192,13 @@ func (m *MockWalletCache) EXPECT() *MockWalletCacheMockRecorder {
 }
 
 // AcquireHydrationLock mocks base method.
-func (m *MockWalletCache) AcquireHydrationLock(ctx context.Context, userID int64) (bool, error) {
+func (m *MockWalletCache) AcquireHydrationLock(ctx context.Context, userID int64) (string, bool, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "AcquireHydrationLock", ctx, userID)
-	ret0, _ := ret[0].(bool)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
 }
 
 // AcquireHydrationLock indicates an expected call of AcquireHydrationLock.
@@ -250,17 +251,17 @@ func (mr *MockWalletCacheMockRecorder) PreProcess(ctx, op, providerID, providerT
 }
 
 // ReleaseHydrationLock mocks base method.
-func (m *MockWalletCache) ReleaseHydrationLock(ctx context.Context, userID int64) error {
+func (m *MockWalletCache) ReleaseHydrationLock(ctx context.Context, userID int64, token string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ReleaseHydrationLock", ctx, userID)
+	ret := m.ctrl.Call(m, "ReleaseHydrationLock", ctx, userID, token)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // ReleaseHydrationLock indicates an expected call of ReleaseHydrationLock.
-func (mr *MockWalletCacheMockRecorder) ReleaseHydrationLock(ctx, userID any) *gomock.Call {
+func (mr *MockWalletCacheMockRecorder) ReleaseHydrationLock(ctx, userID, token any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReleaseHydrationLock", reflect.TypeOf((*MockWalletCache)(nil).ReleaseHydrationLock), ctx, userID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReleaseHydrationLock", reflect.TypeOf((*MockWalletCache)(nil).ReleaseHydrationLock), ctx, userID, token)
 }
 
 // MockUnitOfWork is a mock of UnitOfWork interface.

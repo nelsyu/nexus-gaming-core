@@ -71,8 +71,10 @@ type WalletCache interface {
 	Invalidate(ctx context.Context, userID int64, currency, providerID, providerTxID string) error
 
 	// 分散式快取重建鎖 (Hydration Lock)
-	AcquireHydrationLock(ctx context.Context, userID int64) (bool, error)
-	ReleaseHydrationLock(ctx context.Context, userID int64) error
+	// AcquireHydrationLock 成功時回傳一個唯一 token，代表「這把鎖是我的」。
+	AcquireHydrationLock(ctx context.Context, userID int64) (token string, acquired bool, err error)
+	// ReleaseHydrationLock 只有在鎖仍屬於 token 持有者時才會刪除，避免鎖過期後誤刪別人的鎖。
+	ReleaseHydrationLock(ctx context.Context, userID int64, token string) error
 }
 
 // WalletUsecase 定義了錢包核心業務邏輯的介面

@@ -8,17 +8,23 @@ import (
 	"time"
 
 	"github.com/bosstest/nexus-core/internal/domain"
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
 //go:embed pre_process.lua
 var preProcessScript string
 
+//go:embed release_lock.lua
+var releaseLockScript string
+
 const (
 	// walletCacheBaseTTL 錢包快取基礎存活時間
 	walletCacheBaseTTL = 1 * time.Hour
 	// walletCacheTTLJitter 隨機抖動上限，避免大量快取在同一秒一起過期造成 DB 被擊穿
 	walletCacheTTLJitter = 10 * time.Minute
+	// hydrationLockTTL 重建鎖存活時間：足夠一次 DB 交易，也能防止持有者崩潰導致死鎖
+	hydrationLockTTL = 5 * time.Second
 )
 
 // walletKey 錢包快取 key。
@@ -32,17 +38,23 @@ func txLockKey(providerID, providerTxID string) string {
 	return fmt.Sprintf("tx:%s:%s", providerID, providerTxID)
 }
 
+func hydrationLockKey(userID int64) string {
+	return fmt.Sprintf("hydration_lock:%d", userID)
+}
+
 // WalletCache 實作了 domain.WalletCache 介面
 type walletCache struct {
-	client     *redis.Client
-	preProcess *redis.Script
+	client      *redis.Client
+	preProcess  *redis.Script
+	releaseLock *redis.Script
 }
 
 // NewWalletCache 建立新的 WalletCache 實例
 func NewWalletCache(client *redis.Client) domain.WalletCache {
 	return &walletCache{
-		client:     client,
-		preProcess: redis.NewScript(preProcessScript),
+		client:      client,
+		preProcess:  redis.NewScript(preProcessScript),
+		releaseLock: redis.NewScript(releaseLockScript),
 	}
 }
 
@@ -91,14 +103,21 @@ func (c *walletCache) Invalidate(ctx context.Context, userID int64, currency, pr
 }
 
 // AcquireHydrationLock 嘗試取得快取重建鎖，避免 Cache Stampede。
-func (c *walletCache) AcquireHydrationLock(ctx context.Context, userID int64) (bool, error) {
-	key := fmt.Sprintf("hydration_lock:%d", userID)
-	// 5 秒 TTL 足夠應付一次資料庫讀取，也能防止 Worker 崩潰導致死鎖
-	return c.client.SetNX(ctx, key, "1", 5*time.Second).Result()
+// 鎖的值是一個隨機 token，釋放時用來確認「這把鎖還是我的」。
+func (c *walletCache) AcquireHydrationLock(ctx context.Context, userID int64) (string, bool, error) {
+	token := uuid.NewString()
+	acquired, err := c.client.SetNX(ctx, hydrationLockKey(userID), token, hydrationLockTTL).Result()
+	if err != nil || !acquired {
+		return "", false, err
+	}
+	return token, true, nil
 }
 
-// ReleaseHydrationLock 釋放快取重建鎖
-func (c *walletCache) ReleaseHydrationLock(ctx context.Context, userID int64) error {
-	key := fmt.Sprintf("hydration_lock:%d", userID)
-	return c.client.Del(ctx, key).Err()
+// ReleaseHydrationLock 只在鎖仍屬於自己時才釋放 (Compare-And-Delete)。
+// 若持有者處理超過 TTL，鎖可能已過期並被其他請求取得，此時不能刪除別人的鎖。
+func (c *walletCache) ReleaseHydrationLock(ctx context.Context, userID int64, token string) error {
+	if err := c.releaseLock.Run(ctx, c.client, []string{hydrationLockKey(userID)}, token).Err(); err != nil {
+		return fmt.Errorf("redis release hydration lock failed: %w", err)
+	}
+	return nil
 }
