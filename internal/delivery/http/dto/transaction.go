@@ -1,0 +1,43 @@
+package dto
+
+import (
+	"github.com/bosstest/nexus-core/internal/domain"
+	"github.com/shopspring/decimal"
+)
+
+// TransactionRequest 定義 HTTP 層專用的交易請求 DTO
+// 職責：處理 HTTP 格式驗證（必填、長度、格式）
+type TransactionRequest struct {
+	UserID       int64                  `json:"user_id" validate:"required,gt=0"`
+	Currency     string                 `json:"currency" validate:"required,len=3,uppercase"`
+	Type         domain.TransactionType `json:"type" validate:"required,transaction_type"`
+	Amount       string                 `json:"amount" validate:"required,decimal_positive"`
+	ProviderID   string                 `json:"provider_id" validate:"required,min=2,max=50,alphanum_underscore"`
+	ProviderTxID string                 `json:"provider_tx_id" validate:"required,min=1,max=100"`
+	ReferenceID  string                 `json:"reference_id" validate:"omitempty,max=100"`
+}
+
+// ToDomain 將 HTTP DTO 轉換為 Domain Request
+// 這裡處理類型轉換（string → decimal.Decimal）
+func (r *TransactionRequest) ToDomain() (*domain.TransactionRequest, error) {
+	amount, err := decimal.NewFromString(r.Amount)
+	if err != nil {
+		return nil, domain.ErrInvalidAmount
+	}
+
+	return &domain.TransactionRequest{
+		UserID:       r.UserID,
+		Currency:     r.Currency,
+		Type:         r.Type,
+		Amount:       amount,
+		ProviderID:   r.ProviderID,
+		ProviderTxID: r.ProviderTxID,
+		ReferenceID:  r.ReferenceID,
+	}, nil
+}
+
+// GetBalanceRequest 定義查詢餘額的請求 DTO
+type GetBalanceRequest struct {
+	UserID   int64  `form:"user_id" validate:"required,gt=0"`
+	Currency string `form:"currency" validate:"required,len=3,uppercase"`
+}

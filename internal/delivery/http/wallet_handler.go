@@ -2,9 +2,9 @@ package http
 
 import (
 	"errors"
-	"net/http"
-	"strconv"
 
+	"github.com/bosstest/nexus-core/internal/delivery/http/dto"
+	"github.com/bosstest/nexus-core/internal/delivery/http/response"
 	"github.com/bosstest/nexus-core/internal/domain"
 	"github.com/gin-gonic/gin"
 )
@@ -21,60 +21,60 @@ func NewWalletHandler(wu domain.WalletUsecase) *WalletHandler {
 
 // GetBalance 查詢玩家錢包餘額
 func (h *WalletHandler) GetBalance(c *gin.Context) {
-	userIDStr := c.Query("user_id")
-	currency := c.Query("currency")
-
-	if userIDStr == "" || currency == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing user_id or currency"})
+	// 使用 ShouldBindQuery 自動驗證 query parameters
+	var req dto.GetBalanceRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		response.ValidationError(c, err)
 		return
 	}
 
-	userID, err := strconv.ParseInt(userIDStr, 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user_id"})
-		return
-	}
-
-	wallet, err := h.walletUsecase.GetBalance(c.Request.Context(), userID, currency)
+	wallet, err := h.walletUsecase.GetBalance(c.Request.Context(), req.UserID, req.Currency)
 	if err != nil {
 		if errors.Is(err, domain.ErrWalletNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "wallet not found"})
+			response.NotFound(c, "wallet not found")
 			return
 		}
-		c.Error(err) // 將詳細錯誤加入 Gin 的 Context 中，讓 LoggerMiddleware 紀錄
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		response.InternalServerError(c, "internal server error")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": wallet,
-	})
+	response.Success(c, wallet)
 }
 
 // ProcessTransaction 處理第三方遊戲商扣款/派彩
 func (h *WalletHandler) ProcessTransaction(c *gin.Context) {
-	var req domain.TransactionRequest
+	// 1. HTTP 層驗證：格式、必填、長度
+	var req dto.TransactionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+		response.ValidationError(c, err)
 		return
 	}
 
-	tx, err := h.walletUsecase.ProcessTransaction(c.Request.Context(), &req)
+	// 2. 轉換為 Domain Request
+	domainReq, err := req.ToDomain()
 	if err != nil {
+		response.BadRequest(c, "invalid amount format")
+		return
+	}
+
+	// 3. 執行業務邏輯
+	tx, err := h.walletUsecase.ProcessTransaction(c.Request.Context(), domainReq)
+	if err != nil {
+		if errors.Is(err, domain.ErrInvalidAmount) {
+			response.BadRequest(c, err.Error())
+			return
+		}
 		if errors.Is(err, domain.ErrInsufficientFunds) {
-			c.JSON(http.StatusPaymentRequired, gin.H{"error": "insufficient funds"})
+			response.PaymentRequired(c, "insufficient funds")
 			return
 		}
 		if errors.Is(err, domain.ErrWalletNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "wallet not found"})
+			response.NotFound(c, "wallet not found")
 			return
 		}
-		c.Error(err) // 將詳細錯誤加入 Gin 的 Context 中，讓 LoggerMiddleware 紀錄
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		response.InternalServerError(c, "internal server error")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": tx,
-	})
+	response.Success(c, tx)
 }

@@ -42,9 +42,9 @@ func (u *walletUsecase) GetBalance(ctx context.Context, userID int64, currency s
 }
 
 func (u *walletUsecase) ProcessTransaction(ctx context.Context, req *domain.TransactionRequest) (*domain.Transaction, error) {
-	// 1. 基本防呆檢查
-	if req.Amount.LessThan(decimal.Zero) {
-		return nil, fmt.Errorf("amount must be positive")
+	// 1. 基本防呆檢查 (Domain Invariant Guard: 核心業務規則斷言，金額必須大於零)
+	if req.Amount.LessThanOrEqual(decimal.Zero) {
+		return nil, domain.ErrInvalidAmount
 	}
 
 	// 2. Redis Fast-path：統一處理所有交易類型的防重鎖與餘額預處理

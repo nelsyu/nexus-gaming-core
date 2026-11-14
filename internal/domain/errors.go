@@ -16,4 +16,5 @@ var (
 	ErrTokenRevoked         = errors.New("token has been revoked")
 	ErrUnauthorized         = errors.New("unauthorized")
 	ErrForbidden            = errors.New("forbidden")
+	ErrInvalidAmount        = errors.New("invalid amount: must be greater than zero")
 )

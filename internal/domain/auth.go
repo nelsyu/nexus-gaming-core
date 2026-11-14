@@ -24,25 +24,20 @@ type TokenPair struct {
 	TokenType    string `json:"token_type"` // 固定為 "Bearer"
 }
 
-// RegisterRequest 註冊 DTO
+// RegisterRequest 註冊業務參數
 type RegisterRequest struct {
-	TenantID string `json:"tenant_id" binding:"required,min=2,max=30"`
-	Username string `json:"username" binding:"required,min=3,max=50"`
-	Password string `json:"password" binding:"required,min=6,max=100"`
-	Currency string `json:"currency" binding:"required,len=3"`
+	TenantID string `json:"tenant_id"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+	Currency string `json:"currency"`
 	Role     Role   `json:"role"`
 }
 
-// LoginRequest 登入 DTO
+// LoginRequest 登入業務參數
 type LoginRequest struct {
-	TenantID string `json:"tenant_id" binding:"required,min=2,max=30"`
-	Username string `json:"username" binding:"required,min=3,max=50"`
-	Password string `json:"password" binding:"required,min=6,max=100"`
-}
-
-// LogoutRequest 登出 DTO
-type LogoutRequest struct {
-	RefreshToken string `json:"refresh_token" binding:"required"`
+	TenantID string `json:"tenant_id"`
+	Username string `json:"username"`
+	Password string `json:"password"`
 }
 
 // PasswordHasher 定義密碼雜湊抽象介面

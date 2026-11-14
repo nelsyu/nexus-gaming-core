@@ -19,19 +19,47 @@ func NewAuthHandler(authUsecase domain.AuthUsecase) *AuthHandler {
 	}
 }
 
+// RegisterRequest HTTP 註冊請求 DTO
+type RegisterRequest struct {
+	TenantID string      `json:"tenant_id" validate:"required,min=2,max=30"`
+	Username string      `json:"username" validate:"required,min=3,max=50"`
+	Password string      `json:"password" validate:"required,min=6,max=100"`
+	Currency string      `json:"currency" validate:"required,len=3"`
+	Role     domain.Role `json:"role"`
+}
+
+// LoginRequest HTTP 登入請求 DTO
+type LoginRequest struct {
+	TenantID string `json:"tenant_id" validate:"required,min=2,max=30"`
+	Username string `json:"username" validate:"required,min=3,max=50"`
+	Password string `json:"password" validate:"required,min=6,max=100"`
+}
+
+// RefreshTokenRequest HTTP 換發 Token 請求 DTO
 type RefreshTokenRequest struct {
-	RefreshToken string `json:"refresh_token" binding:"required"`
+	RefreshToken string `json:"refresh_token" validate:"required"`
+}
+
+// LogoutRequest HTTP 登出請求 DTO
+type LogoutRequest struct {
+	RefreshToken string `json:"refresh_token" validate:"required"`
 }
 
 // Register 處理使用者註冊
 func (h *AuthHandler) Register(c *gin.Context) {
-	var req domain.RegisterRequest
+	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
 		return
 	}
 
-	user, err := h.authUsecase.Register(c.Request.Context(), &req)
+	user, err := h.authUsecase.Register(c.Request.Context(), &domain.RegisterRequest{
+		TenantID: req.TenantID,
+		Username: req.Username,
+		Password: req.Password,
+		Currency: req.Currency,
+		Role:     req.Role,
+	})
 	if err != nil {
 		if errors.Is(err, domain.ErrUserAlreadyExists) {
 			c.JSON(http.StatusConflict, gin.H{"error": "user already exists in this tenant"})
@@ -55,13 +83,17 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 // Login 處理使用者登入驗證
 func (h *AuthHandler) Login(c *gin.Context) {
-	var req domain.LoginRequest
+	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
 		return
 	}
 
-	tokenPair, err := h.authUsecase.Login(c.Request.Context(), &req)
+	tokenPair, err := h.authUsecase.Login(c.Request.Context(), &domain.LoginRequest{
+		TenantID: req.TenantID,
+		Username: req.Username,
+		Password: req.Password,
+	})
 	if err != nil {
 		if errors.Is(err, domain.ErrInvalidCredentials) {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid username or password"})
@@ -105,7 +137,7 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 // Header: Authorization: Bearer <access_token>（已由 AuthMiddleware 驗證）
 // Body:   {"refresh_token": "..."}
 func (h *AuthHandler) Logout(c *gin.Context) {
-	var req domain.LogoutRequest
+	var req LogoutRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
 		return

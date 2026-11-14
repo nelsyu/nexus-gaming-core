@@ -96,6 +96,7 @@ func Test_ProcessTransaction_DuplicateTx(t *testing.T) {
 		ProviderID:   "pgsoft",
 		ProviderTxID: "tx123",
 		Type:         domain.TxTypeBet,
+		Amount:       decimal.NewFromInt(100),
 	}
 
 	// Redis 阻擋重複訂單
@@ -194,4 +195,26 @@ func Test_ProcessTransaction_DBError_CompensationPublished(t *testing.T) {
 
 	_, err := uc.ProcessTransaction(context.Background(), req)
 	require.ErrorContains(t, err, "process transaction failed")
+}
+
+func Test_ProcessTransaction_InvalidAmount(t *testing.T) {
+	_, _, _, _, _, uc := setupTest(t)
+
+	// 測試金額為 0
+	zeroReq := &domain.TransactionRequest{
+		UserID: 1,
+		Type:   domain.TxTypeBet,
+		Amount: decimal.Zero,
+	}
+	_, err := uc.ProcessTransaction(context.Background(), zeroReq)
+	assert.ErrorIs(t, err, domain.ErrInvalidAmount)
+
+	// 測試金額為負數
+	negativeReq := &domain.TransactionRequest{
+		UserID: 1,
+		Type:   domain.TxTypeBet,
+		Amount: decimal.NewFromInt(-50),
+	}
+	_, err = uc.ProcessTransaction(context.Background(), negativeReq)
+	assert.ErrorIs(t, err, domain.ErrInvalidAmount)
 }

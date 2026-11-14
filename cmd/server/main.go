@@ -6,12 +6,15 @@ import (
 	"time"
 
 	nexushttp "github.com/bosstest/nexus-core/internal/delivery/http"
+	customvalidator "github.com/bosstest/nexus-core/internal/delivery/http/validator"
 	nexusauth "github.com/bosstest/nexus-core/internal/infrastructure/auth"
 	"github.com/bosstest/nexus-core/internal/infrastructure/postgres"
 	"github.com/bosstest/nexus-core/internal/infrastructure/rabbitmq"
 	"github.com/bosstest/nexus-core/internal/infrastructure/redis"
 	"github.com/bosstest/nexus-core/internal/usecase"
 	"github.com/bosstest/nexus-core/pkg/logger"
+	"github.com/gin-gonic/gin/binding"
+	"github.com/go-playground/validator/v10"
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
 )
@@ -105,10 +108,22 @@ func main() {
 	walletHandler := nexushttp.NewWalletHandler(walletUsecase)
 	authHandler := nexushttp.NewAuthHandler(authUsecase)
 
-	// 6. 註冊路由與安全性中介軟體
+	// 6. 註冊自定義驗證器並配置 Gin 使用 validate tag
+	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
+		// 將 Gin 的 tag 從 "binding" 改為 "validate"
+		v.SetTagName("validate")
+
+		// 註冊自定義驗證器
+		if err := customvalidator.RegisterCustomValidators(v); err != nil {
+			logger.GetLogger().Fatal("Failed to register custom validators", zap.Error(err))
+		}
+		logger.GetLogger().Info("Custom validators registered successfully with 'validate' tag")
+	}
+
+	// 7. 註冊路由與安全性中介軟體
 	router := nexushttp.SetupRouter(walletHandler, authHandler, jwtManager, tokenBlacklist)
 
-	// 7. 啟動伺服器
+	// 8. 啟動伺服器
 	logger.GetLogger().Info("Nexus-Core Server starting...", zap.String("port", port))
 	if err := router.Run(":" + port); err != nil {
 		logger.GetLogger().Fatal("Failed to run server", zap.Error(err))
