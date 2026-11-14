@@ -59,11 +59,16 @@ type WalletRepository interface {
 	UpdateBalance(ctx context.Context, wallet *Wallet) error
 }
 
-// WalletCache 定義了快取層的介面
+// WalletCache 定義了快取層的介面。
+// 快取只是加速用的副本，Postgres 才是唯一可信來源 (Source of Truth)。
+// 所有金額參數皆為整數最小單位 (見 ToMinorUnits)。
 type WalletCache interface {
-	PreProcess(ctx context.Context, op, providerID, providerTxID string, userID int64, currency string, amount float64) (int, error)
-	InitCacheIfMissing(ctx context.Context, userID int64, currency string, balance float64) error
-	RefundAndUnlock(ctx context.Context, userID int64, currency, providerID, providerTxID string, amount float64) error
+	PreProcess(ctx context.Context, op, providerID, providerTxID string, userID int64, currency string, amountUnits int64) (int, error)
+	InitCacheIfMissing(ctx context.Context, userID int64, currency string, balanceUnits int64) error
+
+	// Invalidate 刪除錢包快取與該筆交易的防重鎖。
+	// 當 DB 結果失敗或不確定時呼叫，下一個請求會從 DB 重建快取，不在快取上做反向加減。
+	Invalidate(ctx context.Context, userID int64, currency, providerID, providerTxID string) error
 
 	// 分散式快取重建鎖 (Hydration Lock)
 	AcquireHydrationLock(ctx context.Context, userID int64) (bool, error)

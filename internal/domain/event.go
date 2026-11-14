@@ -20,7 +20,9 @@ type TransactionCompletedEvent struct {
 	Timestamp     time.Time       `json:"timestamp"`
 }
 
-// CompensationEvent 表示一筆交易在 Redis 預處理成功但 DB 落庫失敗，需要進行非同步補償的事件
+// CompensationEvent 表示一筆交易在 Redis 預處理成功但 DB 落庫失敗/結果不確定，
+// 且 API 當下同步刪除快取也失敗 (例如 Redis 暫時不可用) 時，交由 Worker 非同步重試「刪除快取」。
+// Worker 只做 Invalidate，不做金額反向加減；Type/Amount 僅供稽核日誌使用。
 type CompensationEvent struct {
 	ProviderID   string          `json:"provider_id"`
 	ProviderTxID string          `json:"provider_tx_id"`
