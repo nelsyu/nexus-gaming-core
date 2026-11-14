@@ -56,6 +56,8 @@ services:
     ports:
       - "8080:8080"
     restart: unless-stopped
+    # 預設只給 10 秒就 SIGKILL；需大於程式內的 shutdownTimeout，讓進行中的交易能完成
+    stop_grace_period: 30s
     depends_on:
       - postgres
       - redis-sentinel
@@ -85,6 +87,7 @@ services:
       - redis-sentinel
       - rabbitmq
     restart: unless-stopped
+    stop_grace_period: 30s
 
   prometheus:
     image: prom/prometheus:latest

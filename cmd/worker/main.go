@@ -18,6 +18,12 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	consumerTag = "worker-1"
+	// shutdownTimeout 需小於 docker-compose 的 stop_grace_period，否則會在處理中被 SIGKILL
+	shutdownTimeout = 20 * time.Second
+)
+
 func main() {
 	_ = godotenv.Load()
 
@@ -47,10 +53,16 @@ func main() {
 	}
 	defer rmqClient.Close()
 
-	// 3. 建立 Consumer
+	// 3. 設定 Prefetch：一次最多只拿 20 則未確認訊息。
+	// 若不設定，RabbitMQ 會把整個 Queue 塞進本機 buffer，關機時這些訊息都得重新投遞。
+	if err := rmqClient.Channel.Qos(20, 0, false); err != nil {
+		logger.GetLogger().Fatal("Failed to set QoS", zap.Error(err))
+	}
+
+	// 4. 建立 Consumer
 	msgs, err := rmqClient.Channel.Consume(
 		rabbitmq.QueueMain, // queue
-		"worker-1",         // consumer id
+		consumerTag,        // consumer id
 		false,              // auto-ack 關閉 (手動確認)
 		false,              // exclusive
 		false,              // no-local
@@ -63,30 +75,32 @@ func main() {
 
 	logger.GetLogger().Info("Worker Started. Waiting for messages...")
 
-	// 4. 使用 Context 與 Channel 優雅關閉
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// 捕捉 Ctrl+C
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
+	// 5. 在背景依序處理訊息；msgs 被關閉 (Consumer 取消) 時迴圈結束並通知 done
+	done := make(chan struct{})
 	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case d, ok := <-msgs:
-				if !ok {
-					return
-				}
-				processMessage(d, walletCache)
-			}
+		defer close(done)
+		for d := range msgs {
+			processMessage(d, walletCache)
 		}
 	}()
 
+	// 6. 優雅關閉：收到訊號後先停止接收新訊息，再等手上的訊息處理完
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
-	logger.GetLogger().Info("Shutting down gracefully...")
+	logger.GetLogger().Info("Shutting down gracefully: cancelling consumer...")
+
+	if err := rmqClient.Channel.Cancel(consumerTag, false); err != nil {
+		logger.GetLogger().Error("Failed to cancel consumer", zap.Error(err))
+	}
+
+	select {
+	case <-done:
+		logger.GetLogger().Info("All in-flight messages processed, worker stopped")
+	case <-time.After(shutdownTimeout):
+		// 超時未處理完的訊息尚未 Ack，連線關閉後 RabbitMQ 會自動重新投遞，不會遺失
+		logger.GetLogger().Warn("Shutdown timeout reached, unacked messages will be redelivered")
+	}
 }
 
 func processMessage(d amqp.Delivery, cache domain.WalletCache) {
