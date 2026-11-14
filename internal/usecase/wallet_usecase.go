@@ -90,15 +90,17 @@ func (u *walletUsecase) ProcessTransaction(ctx context.Context, req *domain.Tran
 		}
 
 		// 遇到 Cache Miss，嘗試爭搶 Hydration Lock
-		hydrationLocked, err = u.cache.AcquireHydrationLock(ctx, req.UserID)
+		var lockToken string
+		lockToken, hydrationLocked, err = u.cache.AcquireHydrationLock(ctx, req.UserID)
 		if err != nil {
 			return nil, fmt.Errorf("acquire hydration lock failed: %w", err)
 		}
 
 		if hydrationLocked {
 			// 搶到鎖！由我們負責查 DB 並重建快取。
+			// 釋放時帶上 token：若我們處理太久、鎖已過期並被別人取得，就不會誤刪別人的鎖。
 			// WithoutCancel：即使客戶端已斷線，也要確實釋放鎖 (同時保留 trace_id 等 context 值)
-			defer u.cache.ReleaseHydrationLock(context.WithoutCancel(ctx), req.UserID)
+			defer u.cache.ReleaseHydrationLock(context.WithoutCancel(ctx), req.UserID, lockToken)
 			break
 		}
 
