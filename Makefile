@@ -1,10 +1,11 @@
-.PHONY: all build run test clean db-up db-down test-load worker install-tools migrate-up migrate-down migrate-status migrate-create seed
+.PHONY: all build run test clean db-up db-down test-load worker reconcile install-tools migrate-up migrate-down migrate-status migrate-create seed
 
 all: build
 
 build:
 	go build -o bin/server.exe cmd/server/main.go
 	go build -o bin/worker.exe cmd/worker/main.go
+	go build -o bin/reconciler.exe cmd/reconciler/main.go
 
 run:
 	docker-compose up --build -d api-server
@@ -31,6 +32,12 @@ RABBITMQ_URL ?= "amqp://guest:guest@localhost:5672/"
 
 worker:
 	RABBITMQ_URL=$(RABBITMQ_URL) go run cmd/worker/main.go
+
+# 對帳：檢查 DB 帳務一致性與 Redis 快取漂移 (預設只回報)
+# 用法：make reconcile                    只回報
+#       make reconcile ARGS=-heal-cache   同時刪除確認漂移的快取
+reconcile:
+	go run cmd/reconciler/main.go $(ARGS)
 
 # 資料庫 Migration 與 Seed 指令
 DATABASE_URL ?= "postgres://postgres:postgres@localhost:5432/nexus_db?sslmode=disable"
