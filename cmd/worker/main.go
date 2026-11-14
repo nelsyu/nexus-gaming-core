@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/bosstest/nexus-core/internal/domain"
 	"github.com/bosstest/nexus-core/internal/infrastructure/rabbitmq"
@@ -97,23 +98,17 @@ func processMessage(d amqp.Delivery, cache domain.WalletCache) {
 			return
 		}
 
-		amountFloat, _ := compEvent.Amount.Float64()
-		// 根據原始操作的方向決定補償方向：
-		// DEBIT Redis 已扣款 → 補償需加回 (RefundAndUnlock 內部用 HINCRBYFLOAT +amount)
-		// CREDIT Redis 已加款 → 補償需扣回 (傳入負值)
-		compensationAmount := amountFloat
-		if compEvent.Type == domain.TxTypeWin || compEvent.Type == domain.TxTypeDeposit || compEvent.Type == domain.TxTypeRefund {
-			compensationAmount = -amountFloat // 逆向補償
-		}
-
-		err := cache.RefundAndUnlock(context.Background(), compEvent.UserID, compEvent.Currency, compEvent.ProviderID, compEvent.ProviderTxID, compensationAmount)
+		// 只刪除快取，不做金額反向加減：下一個請求會從 DB (唯一可信來源) 重建正確餘額
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := cache.Invalidate(ctx, compEvent.UserID, compEvent.Currency, compEvent.ProviderID, compEvent.ProviderTxID)
+		cancel()
 		if err != nil {
-			logger.GetLogger().Error("Failed to revert Redis balance", zap.Error(err))
+			logger.GetLogger().Error("Failed to invalidate wallet cache", zap.Error(err))
 			_ = d.Nack(false, true) // 重試
 			return
 		}
 
-		logger.GetLogger().Info("Compensation done",
+		logger.GetLogger().Info("Cache invalidation done",
 			zap.String("type", string(compEvent.Type)),
 			zap.Int64("user_id", compEvent.UserID),
 			zap.String("provider_tx_id", compEvent.ProviderTxID),

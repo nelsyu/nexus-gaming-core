@@ -207,46 +207,46 @@ func (mr *MockWalletCacheMockRecorder) AcquireHydrationLock(ctx, userID any) *go
 }
 
 // InitCacheIfMissing mocks base method.
-func (m *MockWalletCache) InitCacheIfMissing(ctx context.Context, userID int64, currency string, balance float64) error {
+func (m *MockWalletCache) InitCacheIfMissing(ctx context.Context, userID int64, currency string, balanceUnits int64) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "InitCacheIfMissing", ctx, userID, currency, balance)
+	ret := m.ctrl.Call(m, "InitCacheIfMissing", ctx, userID, currency, balanceUnits)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // InitCacheIfMissing indicates an expected call of InitCacheIfMissing.
-func (mr *MockWalletCacheMockRecorder) InitCacheIfMissing(ctx, userID, currency, balance any) *gomock.Call {
+func (mr *MockWalletCacheMockRecorder) InitCacheIfMissing(ctx, userID, currency, balanceUnits any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InitCacheIfMissing", reflect.TypeOf((*MockWalletCache)(nil).InitCacheIfMissing), ctx, userID, currency, balance)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InitCacheIfMissing", reflect.TypeOf((*MockWalletCache)(nil).InitCacheIfMissing), ctx, userID, currency, balanceUnits)
+}
+
+// Invalidate mocks base method.
+func (m *MockWalletCache) Invalidate(ctx context.Context, userID int64, currency, providerID, providerTxID string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Invalidate", ctx, userID, currency, providerID, providerTxID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Invalidate indicates an expected call of Invalidate.
+func (mr *MockWalletCacheMockRecorder) Invalidate(ctx, userID, currency, providerID, providerTxID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Invalidate", reflect.TypeOf((*MockWalletCache)(nil).Invalidate), ctx, userID, currency, providerID, providerTxID)
 }
 
 // PreProcess mocks base method.
-func (m *MockWalletCache) PreProcess(ctx context.Context, op, providerID, providerTxID string, userID int64, currency string, amount float64) (int, error) {
+func (m *MockWalletCache) PreProcess(ctx context.Context, op, providerID, providerTxID string, userID int64, currency string, amountUnits int64) (int, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PreProcess", ctx, op, providerID, providerTxID, userID, currency, amount)
+	ret := m.ctrl.Call(m, "PreProcess", ctx, op, providerID, providerTxID, userID, currency, amountUnits)
 	ret0, _ := ret[0].(int)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // PreProcess indicates an expected call of PreProcess.
-func (mr *MockWalletCacheMockRecorder) PreProcess(ctx, op, providerID, providerTxID, userID, currency, amount any) *gomock.Call {
+func (mr *MockWalletCacheMockRecorder) PreProcess(ctx, op, providerID, providerTxID, userID, currency, amountUnits any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PreProcess", reflect.TypeOf((*MockWalletCache)(nil).PreProcess), ctx, op, providerID, providerTxID, userID, currency, amount)
-}
-
-// RefundAndUnlock mocks base method.
-func (m *MockWalletCache) RefundAndUnlock(ctx context.Context, userID int64, currency, providerID, providerTxID string, amount float64) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "RefundAndUnlock", ctx, userID, currency, providerID, providerTxID, amount)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// RefundAndUnlock indicates an expected call of RefundAndUnlock.
-func (mr *MockWalletCacheMockRecorder) RefundAndUnlock(ctx, userID, currency, providerID, providerTxID, amount any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RefundAndUnlock", reflect.TypeOf((*MockWalletCache)(nil).RefundAndUnlock), ctx, userID, currency, providerID, providerTxID, amount)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PreProcess", reflect.TypeOf((*MockWalletCache)(nil).PreProcess), ctx, op, providerID, providerTxID, userID, currency, amountUnits)
 }
 
 // ReleaseHydrationLock mocks base method.
