@@ -1,8 +1,13 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	nexushttp "github.com/bosstest/nexus-core/internal/delivery/http"
@@ -18,6 +23,9 @@ import (
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
 )
+
+// shutdownTimeout 優雅關機的最長等待時間，需小於 docker-compose 的 stop_grace_period
+const shutdownTimeout = 20 * time.Second
 
 func main() {
 	// 1. 讀取環境變數
@@ -124,8 +132,35 @@ func main() {
 	router := nexushttp.SetupRouter(walletHandler, authHandler, jwtManager, tokenBlacklist)
 
 	// 8. 啟動伺服器
-	logger.GetLogger().Info("Nexus-Core Server starting...", zap.String("port", port))
-	if err := router.Run(":" + port); err != nil {
-		logger.GetLogger().Fatal("Failed to run server", zap.Error(err))
+	// 使用 http.Server 而非 router.Run，才能設定逾時並支援優雅關機
+	srv := &http.Server{
+		Addr:              ":" + port,
+		Handler:           router,
+		ReadHeaderTimeout: 5 * time.Second,  // 防 Slowloris：限制讀取 Header 的時間
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      15 * time.Second, // 需大於單筆交易最長處理時間 (含 Hydration 等待約 2.5 秒)
+		IdleTimeout:       60 * time.Second,
 	}
+
+	go func() {
+		logger.GetLogger().Info("Nexus-Core Server starting...", zap.String("port", port))
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.GetLogger().Fatal("Failed to run server", zap.Error(err))
+		}
+	}()
+
+	// 9. 優雅關機：收到 SIGTERM (例如部署/重啟) 時，停止接新請求，等進行中的交易完成再關閉。
+	// 若直接被砍掉，交易可能停在「Redis 已扣、DB 未寫」的中間狀態。
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	logger.GetLogger().Info("Shutting down server gracefully...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		logger.GetLogger().Error("Server forced to shutdown", zap.Error(err))
+	}
+	// main 返回後，上面註冊的 defer 依序關閉 RabbitMQ、Redis、DB 連線
+	logger.GetLogger().Info("Server exited")
 }
