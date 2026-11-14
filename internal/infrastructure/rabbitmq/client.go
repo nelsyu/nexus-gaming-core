@@ -2,6 +2,8 @@ package rabbitmq
 
 import (
 	"fmt"
+	"time"
+
 	"github.com/bosstest/nexus-core/pkg/logger"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -14,6 +16,12 @@ const (
 	RoutingKeyComp     = "wallet.transaction.compensation"
 	QueueMain          = "wallet.transaction.completed.queue"
 	QueueDLQ           = "wallet.transaction.dlq"
+
+	// 重試等待區：訊息在 QueueRetry 停留 RetryDelay 後過期，
+	// 透過 Dead Letter 機制自動回到 ExchangeMain (保留原 routing key)，再次被 Worker 消費。
+	ExchangeRetry = "nexus.events.retry"
+	QueueRetry    = "wallet.transaction.retry.queue"
+	RetryDelay    = 5 * time.Second
 )
 
 type Client struct {
@@ -76,7 +84,29 @@ func InitRabbitMQ(url string) (*Client, error) {
 		return nil, fmt.Errorf("failed to bind main queue for comp: %w", err)
 	}
 
-	logger.GetLogger().Info("Successfully connected to RabbitMQ and configured DLQ")
+	// 3. 宣告重試等待區 (Retry Exchange + 帶 TTL 的 Retry Queue)
+	// 不設定 x-dead-letter-routing-key，過期時會沿用訊息原本的 routing key 回到主交換機。
+	err = ch.ExchangeDeclare(ExchangeRetry, "direct", true, false, false, false, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to declare retry exchange: %w", err)
+	}
+
+	retryArgs := amqp.Table{
+		"x-message-ttl":          RetryDelay.Milliseconds(),
+		"x-dead-letter-exchange": ExchangeMain,
+	}
+	_, err = ch.QueueDeclare(QueueRetry, true, false, false, false, retryArgs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to declare retry queue: %w", err)
+	}
+
+	for _, key := range []string{RoutingKeyTx, RoutingKeyComp} {
+		if err = ch.QueueBind(QueueRetry, key, ExchangeRetry, false, nil); err != nil {
+			return nil, fmt.Errorf("failed to bind retry queue for %s: %w", key, err)
+		}
+	}
+
+	logger.GetLogger().Info("Successfully connected to RabbitMQ and configured DLQ and retry queue")
 
 	return &Client{
 		Conn:    conn,
