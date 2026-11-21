@@ -2,6 +2,8 @@ package http
 
 import (
 	"errors"
+	"fmt"
+	"slices"
 
 	"github.com/bosstest/nexus-core/internal/delivery/http/dto"
 	"github.com/bosstest/nexus-core/internal/delivery/http/response"
@@ -41,12 +43,38 @@ func (h *WalletHandler) GetBalance(c *gin.Context) {
 	response.Success(c, wallet)
 }
 
-// ProcessTransaction 處理第三方遊戲商扣款/派彩
-func (h *WalletHandler) ProcessTransaction(c *gin.Context) {
+// 職責分離：遊戲商只能下注/派彩/退款，營運後台只能存提款
+var (
+	providerTxTypes = []domain.TransactionType{domain.TxTypeBet, domain.TxTypeWin, domain.TxTypeRefund}
+	adminTxTypes    = []domain.TransactionType{domain.TxTypeDeposit, domain.TxTypeWithdraw}
+)
+
+// ProcessProviderTransaction 遊戲商呼叫的下注/派彩/退款 (需通過 ProviderAuthMiddleware)
+func (h *WalletHandler) ProcessProviderTransaction(c *gin.Context) {
+	h.processTransaction(c, providerTxTypes, true)
+}
+
+// ProcessAdminTransaction 營運後台的人工存款/提款 (需通過 JWT 與 RBAC)
+func (h *WalletHandler) ProcessAdminTransaction(c *gin.Context) {
+	h.processTransaction(c, adminTxTypes, false)
+}
+
+func (h *WalletHandler) processTransaction(c *gin.Context, allowedTypes []domain.TransactionType, requireProviderMatch bool) {
 	// 1. HTTP 層驗證：格式、必填、長度
 	var req dto.TransactionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.ValidationError(c, err)
+		return
+	}
+
+	if !slices.Contains(allowedTypes, req.Type) {
+		response.BadRequest(c, fmt.Sprintf("transaction type %s is not allowed on this endpoint", req.Type))
+		return
+	}
+
+	// 簽章只證明「請求是遊戲商 A 發的」；還要確認 A 沒有在 body 裡冒用遊戲商 B 的名義
+	if requireProviderMatch && req.ProviderID != c.GetString(CtxProviderID) {
+		response.Forbidden(c, "provider_id does not match the authenticated provider")
 		return
 	}
 
