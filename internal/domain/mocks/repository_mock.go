@@ -167,6 +167,80 @@ func (mr *MockTransactionRepositoryMockRecorder) GetByProviderTxID(ctx, provider
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetByProviderTxID", reflect.TypeOf((*MockTransactionRepository)(nil).GetByProviderTxID), ctx, providerID, providerTxID)
 }
 
+// GetRefundByTarget mocks base method.
+func (m *MockTransactionRepository) GetRefundByTarget(ctx context.Context, providerID, betProviderTxID string) (*domain.Transaction, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetRefundByTarget", ctx, providerID, betProviderTxID)
+	ret0, _ := ret[0].(*domain.Transaction)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetRefundByTarget indicates an expected call of GetRefundByTarget.
+func (mr *MockTransactionRepositoryMockRecorder) GetRefundByTarget(ctx, providerID, betProviderTxID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRefundByTarget", reflect.TypeOf((*MockTransactionRepository)(nil).GetRefundByTarget), ctx, providerID, betProviderTxID)
+}
+
+// HasActiveBetInRound mocks base method.
+func (m *MockTransactionRepository) HasActiveBetInRound(ctx context.Context, walletID int64, providerID, roundID string) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "HasActiveBetInRound", ctx, walletID, providerID, roundID)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// HasActiveBetInRound indicates an expected call of HasActiveBetInRound.
+func (mr *MockTransactionRepositoryMockRecorder) HasActiveBetInRound(ctx, walletID, providerID, roundID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HasActiveBetInRound", reflect.TypeOf((*MockTransactionRepository)(nil).HasActiveBetInRound), ctx, walletID, providerID, roundID)
+}
+
+// HasWinInRound mocks base method.
+func (m *MockTransactionRepository) HasWinInRound(ctx context.Context, walletID int64, providerID, roundID string) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "HasWinInRound", ctx, walletID, providerID, roundID)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// HasWinInRound indicates an expected call of HasWinInRound.
+func (mr *MockTransactionRepositoryMockRecorder) HasWinInRound(ctx, walletID, providerID, roundID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HasWinInRound", reflect.TypeOf((*MockTransactionRepository)(nil).HasWinInRound), ctx, walletID, providerID, roundID)
+}
+
+// IsBetVoided mocks base method.
+func (m *MockTransactionRepository) IsBetVoided(ctx context.Context, providerID, betProviderTxID string) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsBetVoided", ctx, providerID, betProviderTxID)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// IsBetVoided indicates an expected call of IsBetVoided.
+func (mr *MockTransactionRepositoryMockRecorder) IsBetVoided(ctx, providerID, betProviderTxID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsBetVoided", reflect.TypeOf((*MockTransactionRepository)(nil).IsBetVoided), ctx, providerID, betProviderTxID)
+}
+
+// VoidBet mocks base method.
+func (m *MockTransactionRepository) VoidBet(ctx context.Context, walletID int64, providerID, betProviderTxID, voidedByProviderTxID string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "VoidBet", ctx, walletID, providerID, betProviderTxID, voidedByProviderTxID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// VoidBet indicates an expected call of VoidBet.
+func (mr *MockTransactionRepositoryMockRecorder) VoidBet(ctx, walletID, providerID, betProviderTxID, voidedByProviderTxID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VoidBet", reflect.TypeOf((*MockTransactionRepository)(nil).VoidBet), ctx, walletID, providerID, betProviderTxID, voidedByProviderTxID)
+}
+
 // MockWalletCache is a mock of WalletCache interface.
 type MockWalletCache struct {
 	ctrl     *gomock.Controller

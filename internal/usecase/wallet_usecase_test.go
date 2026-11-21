@@ -34,6 +34,7 @@ func Test_ProcessTransaction_Success(t *testing.T) {
 		UserID:       1,
 		Currency:     "TWD",
 		Type:         domain.TxTypeBet,
+		RoundID:      "r1",
 		Amount:       decimal.NewFromInt(100),
 		ProviderID:   "pgsoft",
 		ProviderTxID: "tx123",
@@ -50,6 +51,8 @@ func Test_ProcessTransaction_Success(t *testing.T) {
 	wallet := &domain.Wallet{ID: 10, UserID: 1, Balance: decimal.NewFromInt(500), Currency: "TWD"}
 	mockWalletRepo.EXPECT().GetWalletByUserID(gomock.Any(), int64(1), "TWD").Return(wallet, nil)
 	mockWalletRepo.EXPECT().GetWalletByIDForUpdate(gomock.Any(), int64(10)).Return(wallet, nil)
+	// BET 落庫前要確認沒有被「先到的退款」作廢
+	mockTxRepo.EXPECT().IsBetVoided(gomock.Any(), req.ProviderID, req.ProviderTxID).Return(false, nil)
 
 	// 更新資料庫餘額
 	mockTxRepo.EXPECT().CreateTransaction(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, tx *domain.Transaction) error {
@@ -74,10 +77,11 @@ func Test_ProcessTransaction_InsufficientFunds(t *testing.T) {
 	_, _, mockCache, _, _, uc := setupTest(t)
 
 	req := &domain.TransactionRequest{
-		UserID:       1,
-		Currency:     "TWD",
-		Type:         domain.TxTypeBet,
-		Amount:       decimal.NewFromInt(100),
+		UserID:   1,
+		Currency: "TWD",
+		Type:     domain.TxTypeBet,
+		RoundID:  "r1",
+		Amount:   decimal.NewFromInt(100),
 	}
 
 	// Redis 立即偵測到餘額不足
@@ -95,6 +99,7 @@ func Test_ProcessTransaction_DuplicateTx(t *testing.T) {
 		ProviderID:   "pgsoft",
 		ProviderTxID: "tx123",
 		Type:         domain.TxTypeBet,
+		RoundID:      "r1",
 		Amount:       decimal.NewFromInt(100),
 	}
 
@@ -113,14 +118,15 @@ func Test_ProcessTransaction_CacheMiss_RetrySuccess(t *testing.T) {
 	_, _, mockCache, _, mockUoW, uc := setupTest(t)
 
 	req := &domain.TransactionRequest{
-		UserID:       1,
-		Type:         domain.TxTypeBet,
-		Amount:       decimal.NewFromInt(100),
+		UserID:  1,
+		Type:    domain.TxTypeBet,
+		RoundID: "r1",
+		Amount:  decimal.NewFromInt(100),
 	}
 
 	// 第一次嘗試：快取未擊中 (Cache Miss)
 	mockCache.EXPECT().PreProcess(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(domain.ResultCacheMiss, nil)
-	
+
 	// 第一次嘗試：取得鎖失敗 (其他請求正在重建快取)
 	mockCache.EXPECT().AcquireHydrationLock(gomock.Any(), int64(1)).Return("", false, nil)
 
@@ -141,9 +147,10 @@ func Test_ProcessTransaction_DBPanic_CacheInvalidated(t *testing.T) {
 	_, _, mockCache, _, mockUoW, uc := setupTest(t)
 
 	req := &domain.TransactionRequest{
-		UserID:       1,
-		Type:         domain.TxTypeBet,
-		Amount:       decimal.NewFromInt(100),
+		UserID:  1,
+		Type:    domain.TxTypeBet,
+		RoundID: "r1",
+		Amount:  decimal.NewFromInt(100),
 	}
 
 	mockCache.EXPECT().PreProcess(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(domain.ResultSuccess, nil)
@@ -165,9 +172,10 @@ func Test_ProcessTransaction_CacheMiss_Timeout(t *testing.T) {
 	_, _, mockCache, _, _, uc := setupTest(t)
 
 	req := &domain.TransactionRequest{
-		UserID:       1,
-		Type:         domain.TxTypeBet,
-		Amount:       decimal.NewFromInt(100),
+		UserID:  1,
+		Type:    domain.TxTypeBet,
+		RoundID: "r1",
+		Amount:  decimal.NewFromInt(100),
 	}
 
 	// 模擬一直拿不到 Hydration Lock，迴圈 50 次都會失敗
@@ -182,9 +190,10 @@ func Test_ProcessTransaction_CommitFailed_CacheInvalidated(t *testing.T) {
 	_, _, mockCache, _, mockUoW, uc := setupTest(t)
 
 	req := &domain.TransactionRequest{
-		UserID:       1,
-		Type:         domain.TxTypeBet,
-		Amount:       decimal.NewFromInt(100),
+		UserID:  1,
+		Type:    domain.TxTypeBet,
+		RoundID: "r1",
+		Amount:  decimal.NewFromInt(100),
 	}
 
 	mockCache.EXPECT().PreProcess(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(domain.ResultSuccess, nil)
@@ -204,18 +213,20 @@ func Test_ProcessTransaction_InvalidAmount(t *testing.T) {
 
 	// 測試金額為 0
 	zeroReq := &domain.TransactionRequest{
-		UserID: 1,
-		Type:   domain.TxTypeBet,
-		Amount: decimal.Zero,
+		UserID:  1,
+		Type:    domain.TxTypeBet,
+		RoundID: "r1",
+		Amount:  decimal.Zero,
 	}
 	_, err := uc.ProcessTransaction(context.Background(), zeroReq)
 	assert.ErrorIs(t, err, domain.ErrInvalidAmount)
 
 	// 測試金額為負數
 	negativeReq := &domain.TransactionRequest{
-		UserID: 1,
-		Type:   domain.TxTypeBet,
-		Amount: decimal.NewFromInt(-50),
+		UserID:  1,
+		Type:    domain.TxTypeBet,
+		RoundID: "r1",
+		Amount:  decimal.NewFromInt(-50),
 	}
 	_, err = uc.ProcessTransaction(context.Background(), negativeReq)
 	assert.ErrorIs(t, err, domain.ErrInvalidAmount)
@@ -225,7 +236,7 @@ func Test_ProcessTransaction_InvalidAmount(t *testing.T) {
 func Test_ProcessTransaction_ContextCanceledDuringDB_CacheInvalidated(t *testing.T) {
 	_, _, mockCache, _, mockUoW, uc := setupTest(t)
 
-	req := &domain.TransactionRequest{UserID: 1, Currency: "TWD", Type: domain.TxTypeBet, Amount: decimal.NewFromInt(100), ProviderID: "pgsoft", ProviderTxID: "tx1"}
+	req := &domain.TransactionRequest{UserID: 1, Currency: "TWD", Type: domain.TxTypeBet, RoundID: "r1", Amount: decimal.NewFromInt(100), ProviderID: "pgsoft", ProviderTxID: "tx1"}
 
 	mockCache.EXPECT().PreProcess(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(domain.ResultSuccess, nil)
 	mockUoW.EXPECT().DoTx(gomock.Any(), gomock.Any()).Return(context.Canceled)
@@ -246,7 +257,7 @@ func Test_ProcessTransaction_ContextCanceledDuringDB_CacheInvalidated(t *testing
 func Test_ProcessTransaction_DuplicateInDBAfterRedisApplied_InvalidatesAndReturnsExisting(t *testing.T) {
 	_, mockTxRepo, mockCache, _, mockUoW, uc := setupTest(t)
 
-	req := &domain.TransactionRequest{UserID: 1, Currency: "TWD", Type: domain.TxTypeBet, Amount: decimal.NewFromInt(100), ProviderID: "pgsoft", ProviderTxID: "tx1"}
+	req := &domain.TransactionRequest{UserID: 1, Currency: "TWD", Type: domain.TxTypeBet, RoundID: "r1", Amount: decimal.NewFromInt(100), ProviderID: "pgsoft", ProviderTxID: "tx1"}
 
 	mockCache.EXPECT().PreProcess(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(domain.ResultSuccess, nil)
 	mockUoW.EXPECT().DoTx(gomock.Any(), gomock.Any()).Return(domain.ErrDuplicateTransaction)
@@ -264,7 +275,7 @@ func Test_ProcessTransaction_DuplicateInDBAfterRedisApplied_InvalidatesAndReturn
 func Test_ProcessTransaction_InvalidateFails_FallsBackToEvent(t *testing.T) {
 	_, _, mockCache, mockPub, mockUoW, uc := setupTest(t)
 
-	req := &domain.TransactionRequest{UserID: 1, Currency: "TWD", Type: domain.TxTypeBet, Amount: decimal.NewFromInt(100), ProviderID: "pgsoft", ProviderTxID: "tx1"}
+	req := &domain.TransactionRequest{UserID: 1, Currency: "TWD", Type: domain.TxTypeBet, RoundID: "r1", Amount: decimal.NewFromInt(100), ProviderID: "pgsoft", ProviderTxID: "tx1"}
 
 	mockCache.EXPECT().PreProcess(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(domain.ResultSuccess, nil)
 	mockUoW.EXPECT().DoTx(gomock.Any(), gomock.Any()).Return(domain.ErrCommitFailed)
@@ -284,7 +295,7 @@ func Test_ProcessTransaction_InvalidateFails_FallsBackToEvent(t *testing.T) {
 func Test_ProcessTransaction_HydrationPathDBFails_NoInvalidate(t *testing.T) {
 	_, _, mockCache, _, mockUoW, uc := setupTest(t)
 
-	req := &domain.TransactionRequest{UserID: 1, Currency: "TWD", Type: domain.TxTypeBet, Amount: decimal.NewFromInt(100)}
+	req := &domain.TransactionRequest{UserID: 1, Currency: "TWD", Type: domain.TxTypeBet, RoundID: "r1", Amount: decimal.NewFromInt(100)}
 
 	mockCache.EXPECT().PreProcess(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(domain.ResultCacheMiss, nil)
 	mockCache.EXPECT().AcquireHydrationLock(gomock.Any(), int64(1)).Return("my-token", true, nil)
@@ -299,7 +310,7 @@ func Test_ProcessTransaction_HydrationPathDBFails_NoInvalidate(t *testing.T) {
 func Test_ProcessTransaction_HydrationPathSuccess_RebuildsCache(t *testing.T) {
 	mockWalletRepo, mockTxRepo, mockCache, mockPub, mockUoW, uc := setupTest(t)
 
-	req := &domain.TransactionRequest{UserID: 1, Currency: "TWD", Type: domain.TxTypeBet, Amount: decimal.RequireFromString("100.5"), ProviderID: "pgsoft", ProviderTxID: "tx1"}
+	req := &domain.TransactionRequest{UserID: 1, Currency: "TWD", Type: domain.TxTypeBet, RoundID: "r1", Amount: decimal.RequireFromString("100.5"), ProviderID: "pgsoft", ProviderTxID: "tx1"}
 
 	mockCache.EXPECT().PreProcess(gomock.Any(), "DEBIT", "pgsoft", "tx1", int64(1), "TWD", int64(1_005_000)).Return(domain.ResultCacheMiss, nil)
 	mockCache.EXPECT().AcquireHydrationLock(gomock.Any(), int64(1)).Return("my-token", true, nil)
@@ -311,6 +322,8 @@ func Test_ProcessTransaction_HydrationPathSuccess_RebuildsCache(t *testing.T) {
 	wallet := &domain.Wallet{ID: 10, UserID: 1, Balance: decimal.NewFromInt(500), Currency: "TWD"}
 	mockWalletRepo.EXPECT().GetWalletByUserID(gomock.Any(), int64(1), "TWD").Return(wallet, nil)
 	mockWalletRepo.EXPECT().GetWalletByIDForUpdate(gomock.Any(), int64(10)).Return(wallet, nil)
+	// BET 落庫前要確認沒有被「先到的退款」作廢
+	mockTxRepo.EXPECT().IsBetVoided(gomock.Any(), req.ProviderID, req.ProviderTxID).Return(false, nil)
 	mockTxRepo.EXPECT().CreateTransaction(gomock.Any(), gomock.Any()).Return(nil)
 	mockWalletRepo.EXPECT().UpdateBalance(gomock.Any(), gomock.Any()).Return(nil)
 
@@ -326,7 +339,7 @@ func Test_ProcessTransaction_HydrationPathSuccess_RebuildsCache(t *testing.T) {
 func Test_ProcessTransaction_CacheMissWait_RespectsContextCancel(t *testing.T) {
 	_, _, mockCache, _, _, uc := setupTest(t)
 
-	req := &domain.TransactionRequest{UserID: 1, Type: domain.TxTypeBet, Amount: decimal.NewFromInt(100)}
+	req := &domain.TransactionRequest{UserID: 1, Type: domain.TxTypeBet, RoundID: "r1", Amount: decimal.NewFromInt(100)}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	mockCache.EXPECT().PreProcess(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(domain.ResultCacheMiss, nil)
@@ -343,7 +356,7 @@ func Test_ProcessTransaction_CacheMissWait_RespectsContextCancel(t *testing.T) {
 func Test_ProcessTransaction_TooManyDecimals_Rejected(t *testing.T) {
 	_, _, _, _, _, uc := setupTest(t)
 
-	req := &domain.TransactionRequest{UserID: 1, Type: domain.TxTypeBet, Amount: decimal.RequireFromString("0.00001")}
+	req := &domain.TransactionRequest{UserID: 1, Type: domain.TxTypeBet, RoundID: "r1", Amount: decimal.RequireFromString("0.00001")}
 	_, err := uc.ProcessTransaction(context.Background(), req)
 	require.ErrorIs(t, err, domain.ErrInvalidAmount)
 }
