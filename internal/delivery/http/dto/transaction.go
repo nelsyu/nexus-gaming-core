@@ -15,6 +15,11 @@ type TransactionRequest struct {
 	ProviderID   string                 `json:"provider_id" validate:"required,min=2,max=50,alphanum_underscore"`
 	ProviderTxID string                 `json:"provider_tx_id" validate:"required,min=1,max=100"`
 	ReferenceID  string                 `json:"reference_id" validate:"omitempty,max=100"`
+
+	// BET / WIN 必填 round_id、REFUND 必填 related_provider_tx_id：
+	// 「哪種類型必填哪個欄位」屬於業務規則，由 usecase 檢查，HTTP 層只驗格式。
+	RoundID             string `json:"round_id" validate:"omitempty,max=100"`
+	RelatedProviderTxID string `json:"related_provider_tx_id" validate:"omitempty,max=100"`
 }
 
 // ToDomain 將 HTTP DTO 轉換為 Domain Request
@@ -33,6 +38,9 @@ func (r *TransactionRequest) ToDomain() (*domain.TransactionRequest, error) {
 		ProviderID:   r.ProviderID,
 		ProviderTxID: r.ProviderTxID,
 		ReferenceID:  r.ReferenceID,
+
+		RoundID:             r.RoundID,
+		RelatedProviderTxID: r.RelatedProviderTxID,
 	}, nil
 }
 

@@ -60,19 +60,28 @@ func (h *WalletHandler) ProcessTransaction(c *gin.Context) {
 	// 3. 執行業務邏輯
 	tx, err := h.walletUsecase.ProcessTransaction(c.Request.Context(), domainReq)
 	if err != nil {
-		if errors.Is(err, domain.ErrInvalidAmount) {
+		switch {
+		// 400：請求本身有問題，修正後才能重送
+		case errors.Is(err, domain.ErrInvalidAmount),
+			errors.Is(err, domain.ErrRoundIDRequired),
+			errors.Is(err, domain.ErrRefundTargetRequired),
+			errors.Is(err, domain.ErrInvalidRefundTarget):
 			response.BadRequest(c, err.Error())
-			return
-		}
-		if errors.Is(err, domain.ErrInsufficientFunds) {
+		case errors.Is(err, domain.ErrInsufficientFunds):
 			response.PaymentRequired(c, "insufficient funds")
-			return
-		}
-		if errors.Is(err, domain.ErrWalletNotFound) {
+		// 404：找不到錢包，或退款找不到原注單 (已記錄作廢)
+		case errors.Is(err, domain.ErrWalletNotFound):
 			response.NotFound(c, "wallet not found")
-			return
+		case errors.Is(err, domain.ErrRefundTargetNotFound):
+			response.NotFound(c, err.Error())
+		// 409：與既有狀態衝突 (注單已作廢、已派彩、該局沒有下注)
+		case errors.Is(err, domain.ErrBetVoided),
+			errors.Is(err, domain.ErrBetAlreadySettled),
+			errors.Is(err, domain.ErrWinWithoutBet):
+			response.Conflict(c, err.Error())
+		default:
+			response.InternalServerError(c, "internal server error")
 		}
-		response.InternalServerError(c, "internal server error")
 		return
 	}
 

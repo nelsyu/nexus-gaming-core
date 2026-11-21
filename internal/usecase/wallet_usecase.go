@@ -59,6 +59,15 @@ func (u *walletUsecase) ProcessTransaction(ctx context.Context, req *domain.Tran
 	if req.Amount.LessThanOrEqual(decimal.Zero) {
 		return nil, domain.ErrInvalidAmount
 	}
+	if err := validateRelations(req); err != nil {
+		return nil, err
+	}
+
+	// 退款走獨立流程：金額以 DB 中的原注單為準，不能先用請求金額在 Redis 預加款
+	if req.Type == domain.TxTypeRefund {
+		return u.processRefund(ctx, req)
+	}
+
 	// 轉為整數最小單位，Redis 端全程用整數運算，避免浮點誤差
 	amountUnits, err := domain.ToMinorUnits(req.Amount)
 	if err != nil {
@@ -70,7 +79,7 @@ func (u *walletUsecase) ProcessTransaction(ctx context.Context, req *domain.Tran
 	switch req.Type {
 	case domain.TxTypeBet, domain.TxTypeWithdraw:
 		redisOp = domain.OpDebit
-	case domain.TxTypeWin, domain.TxTypeDeposit, domain.TxTypeRefund:
+	case domain.TxTypeWin, domain.TxTypeDeposit:
 		redisOp = domain.OpCredit
 	default:
 		return nil, fmt.Errorf("unknown transaction type: %s", req.Type)
@@ -171,19 +180,7 @@ func (u *walletUsecase) ProcessTransaction(ctx context.Context, req *domain.Tran
 	}
 
 	// 發送非同步事件，交給 Worker 處理後續任務 (例如報表、返水)
-	// 即使發送失敗也不 rollback，因為核心金流已成功，可透過對帳腳本補償
-	event := &domain.TransactionCompletedEvent{
-		TransactionID: fmt.Sprintf("%d", newTx.ID),
-		ProviderID:    newTx.ProviderID,
-		ProviderTxID:  newTx.ProviderTxID,
-		UserID:        wallet.UserID,
-		Currency:      wallet.Currency,
-		Type:          newTx.Type,
-		Amount:        newTx.Amount,
-		BalanceAfter:  newTx.BalanceAfter,
-		Timestamp:     newTx.CreatedAt,
-	}
-	_ = u.pub.PublishTransactionCompleted(context.WithoutCancel(ctx), event)
+	u.publishCompleted(ctx, newTx, wallet)
 
 	return newTx, nil
 }
@@ -194,16 +191,15 @@ func (u *walletUsecase) persistTransaction(ctx context.Context, req *domain.Tran
 	var wallet *domain.Wallet
 
 	err := u.uow.DoTx(ctx, func(txCtx context.Context) error {
-		// 取得錢包並加上悲觀鎖 (SELECT ... FOR UPDATE)
-		var innerErr error
-		wallet, innerErr = u.walletR.GetWalletByUserID(txCtx, req.UserID, req.Currency)
+		lockedWallet, innerErr := u.lockWallet(txCtx, req.UserID, req.Currency)
 		if innerErr != nil {
-			return fmt.Errorf("get wallet failed: %w", innerErr)
+			return innerErr
 		}
+		wallet = lockedWallet
 
-		lockedWallet, innerErr := u.walletR.GetWalletByIDForUpdate(txCtx, wallet.ID)
-		if innerErr != nil {
-			return fmt.Errorf("lock wallet failed: %w", innerErr)
+		// 注單規則檢查：必須在鎖住錢包之後做，同一錢包的 BET / WIN / REFUND 才會依序執行，不會互相穿插
+		if innerErr = u.checkRoundRules(txCtx, lockedWallet.ID, req); innerErr != nil {
+			return innerErr
 		}
 
 		// 根據交易類型計算新餘額
@@ -216,7 +212,7 @@ func (u *walletUsecase) persistTransaction(ctx context.Context, req *domain.Tran
 				return domain.ErrInsufficientFunds
 			}
 			balanceAfter = lockedWallet.Balance.Sub(req.Amount)
-		case domain.TxTypeWin, domain.TxTypeDeposit, domain.TxTypeRefund:
+		case domain.TxTypeWin, domain.TxTypeDeposit:
 			balanceAfter = lockedWallet.Balance.Add(req.Amount)
 		default:
 			return fmt.Errorf("unknown transaction type: %s", req.Type)
@@ -232,6 +228,7 @@ func (u *walletUsecase) persistTransaction(ctx context.Context, req *domain.Tran
 			ProviderID:    req.ProviderID,
 			ProviderTxID:  req.ProviderTxID,
 			ReferenceID:   req.ReferenceID,
+			RoundID:       req.RoundID,
 		}
 
 		if innerErr = u.txR.CreateTransaction(txCtx, newTx); innerErr != nil {
@@ -252,7 +249,190 @@ func (u *walletUsecase) persistTransaction(ctx context.Context, req *domain.Tran
 	return newTx, wallet, nil
 }
 
-// invalidateCache 在 DB 失敗或結果不確定時刪除 Redis 快取，讓下一個請求從 DB 重建。
+// lockWallet 取得錢包並加上悲觀鎖 (SELECT ... FOR UPDATE)。必須在 DB 交易內呼叫。
+func (u *walletUsecase) lockWallet(txCtx context.Context, userID int64, currency string) (*domain.Wallet, error) {
+	wallet, err := u.walletR.GetWalletByUserID(txCtx, userID, currency)
+	if err != nil {
+		return nil, fmt.Errorf("get wallet failed: %w", err)
+	}
+	locked, err := u.walletR.GetWalletByIDForUpdate(txCtx, wallet.ID)
+	if err != nil {
+		return nil, fmt.Errorf("lock wallet failed: %w", err)
+	}
+	return locked, nil
+}
+
+// validateRelations 檢查交易關聯欄位是否齊全 (不需查 DB 的規則)
+func validateRelations(req *domain.TransactionRequest) error {
+	switch req.Type {
+	case domain.TxTypeBet, domain.TxTypeWin:
+		if req.RoundID == "" {
+			return domain.ErrRoundIDRequired
+		}
+	case domain.TxTypeRefund:
+		if req.RelatedProviderTxID == "" {
+			return domain.ErrRefundTargetRequired
+		}
+	}
+	return nil
+}
+
+// checkRoundRules 檢查需要查 DB 的注單規則
+func (u *walletUsecase) checkRoundRules(txCtx context.Context, walletID int64, req *domain.TransactionRequest) error {
+	switch req.Type {
+	case domain.TxTypeBet:
+		// 退款比下注先到時，這筆 BET 已被作廢：拒絕扣款，否則玩家會「先拿到退款、後被扣款」的順序錯亂
+		voided, err := u.txR.IsBetVoided(txCtx, req.ProviderID, req.ProviderTxID)
+		if err != nil {
+			return fmt.Errorf("check voided bet failed: %w", err)
+		}
+		if voided {
+			return domain.ErrBetVoided
+		}
+	case domain.TxTypeWin:
+		// 同一局必須有尚未退款的 BET，防止「沒下注就派彩」
+		ok, err := u.txR.HasActiveBetInRound(txCtx, walletID, req.ProviderID, req.RoundID)
+		if err != nil {
+			return fmt.Errorf("check round bet failed: %w", err)
+		}
+		if !ok {
+			return domain.ErrWinWithoutBet
+		}
+	}
+	return nil
+}
+
+// processRefund 處理退款 (Rollback)：
+//
+//	原注單存在         → 退回「原注單金額」(不採信請求中的金額)
+//	原注單已退過       → 回傳第一次的退款結果 (冪等，不重複加錢)
+//	原注單已派彩       → 拒絕 (不能同時拿派彩和退款)
+//	原注單還沒到       → 記錄作廢 (tombstone)，之後該 BET 到達時會被拒絕
+//
+// 退款不走 Redis 預處理，直接落庫後刪除快取，讓下一個請求從 DB 重建。
+func (u *walletUsecase) processRefund(ctx context.Context, req *domain.TransactionRequest) (*domain.Transaction, error) {
+	var refund *domain.Transaction
+	var wallet *domain.Wallet
+	var voided bool
+
+	err := u.uow.DoTx(ctx, func(txCtx context.Context) error {
+		lockedWallet, err := u.lockWallet(txCtx, req.UserID, req.Currency)
+		if err != nil {
+			return err
+		}
+		wallet = lockedWallet
+
+		bet, err := u.txR.GetByProviderTxID(txCtx, req.ProviderID, req.RelatedProviderTxID)
+		if err != nil {
+			return fmt.Errorf("get original bet failed: %w", err)
+		}
+		if bet == nil {
+			// 退款比下注先到：記下作廢紀錄並 commit (回傳 nil)，交易結束後再回報「找不到原注單」
+			if err := u.txR.VoidBet(txCtx, lockedWallet.ID, req.ProviderID, req.RelatedProviderTxID, req.ProviderTxID); err != nil {
+				return fmt.Errorf("void bet failed: %w", err)
+			}
+			voided = true
+			return nil
+		}
+		if bet.Type != domain.TxTypeBet || bet.WalletID != lockedWallet.ID {
+			return domain.ErrInvalidRefundTarget
+		}
+
+		settled, err := u.txR.HasWinInRound(txCtx, lockedWallet.ID, bet.ProviderID, bet.RoundID)
+		if err != nil {
+			return fmt.Errorf("check round settlement failed: %w", err)
+		}
+		if settled {
+			return domain.ErrBetAlreadySettled
+		}
+
+		if !req.Amount.Equal(bet.Amount) {
+			logger.WithTraceID(ctx).Warn("Refund amount differs from original bet, using original bet amount",
+				zap.String("provider_tx_id", req.ProviderTxID),
+				zap.String("requested", req.Amount.String()),
+				zap.String("original", bet.Amount.String()),
+			)
+		}
+
+		balanceAfter := lockedWallet.Balance.Add(bet.Amount)
+		refund = &domain.Transaction{
+			WalletID:            lockedWallet.ID,
+			Type:                domain.TxTypeRefund,
+			Amount:              bet.Amount, // 以原注單金額為準
+			BalanceBefore:       lockedWallet.Balance,
+			BalanceAfter:        balanceAfter,
+			ProviderID:          req.ProviderID,
+			ProviderTxID:        req.ProviderTxID,
+			ReferenceID:         req.ReferenceID,
+			RoundID:             bet.RoundID,
+			RelatedProviderTxID: bet.ProviderTxID,
+		}
+		if err := u.txR.CreateTransaction(txCtx, refund); err != nil {
+			return err // 可能是 ErrDuplicateTransaction 或 ErrBetAlreadyRefunded
+		}
+
+		lockedWallet.Balance = balanceAfter
+		if err := u.walletR.UpdateBalance(txCtx, lockedWallet); err != nil {
+			return fmt.Errorf("update wallet balance failed: %w", err)
+		}
+		return nil
+	})
+
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrDuplicateTransaction):
+			// 同一個退款請求重送：回傳第一次的結果
+			return u.existingTransaction(ctx, func(ctx context.Context) (*domain.Transaction, error) {
+				return u.txR.GetByProviderTxID(ctx, req.ProviderID, req.ProviderTxID)
+			})
+		case errors.Is(err, domain.ErrBetAlreadyRefunded):
+			// 同一筆 BET 已被另一個退款請求退過：回傳那一次的退款，不重複加錢
+			return u.existingTransaction(ctx, func(ctx context.Context) (*domain.Transaction, error) {
+				return u.txR.GetRefundByTarget(ctx, req.ProviderID, req.RelatedProviderTxID)
+			})
+		}
+		return nil, fmt.Errorf("process refund failed: %w", err)
+	}
+	if voided {
+		return nil, domain.ErrRefundTargetNotFound
+	}
+
+	// DB 餘額已改變，刪除快取讓下一個請求從 DB 重建
+	u.invalidateCache(ctx, req)
+	u.publishCompleted(ctx, refund, wallet)
+	return refund, nil
+}
+
+// existingTransaction 冪等回應：查出既有交易回傳，查不到視為錯誤
+func (u *walletUsecase) existingTransaction(ctx context.Context, find func(context.Context) (*domain.Transaction, error)) (*domain.Transaction, error) {
+	tx, err := find(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetch existing transaction failed: %w", err)
+	}
+	if tx == nil {
+		return nil, errors.New("conflicting transaction reported but not found")
+	}
+	return tx, nil
+}
+
+// publishCompleted 發送交易完成事件。失敗不影響交易結果 (核心金流已落庫)，可由對帳補償。
+func (u *walletUsecase) publishCompleted(ctx context.Context, tx *domain.Transaction, wallet *domain.Wallet) {
+	event := &domain.TransactionCompletedEvent{
+		TransactionID: fmt.Sprintf("%d", tx.ID),
+		ProviderID:    tx.ProviderID,
+		ProviderTxID:  tx.ProviderTxID,
+		UserID:        wallet.UserID,
+		Currency:      wallet.Currency,
+		Type:          tx.Type,
+		Amount:        tx.Amount,
+		BalanceAfter:  tx.BalanceAfter,
+		Timestamp:     tx.CreatedAt,
+	}
+	_ = u.pub.PublishTransactionCompleted(context.WithoutCancel(ctx), event)
+}
+
+// invalidateCache 刪除 Redis 快取，讓下一個請求從 DB 重建。
+// 用於 DB 失敗或結果不確定時，以及不經 Redis 預處理就直接改了 DB 餘額時 (例如退款)。
 //
 // 為什麼不做「反向加減」補償？因為 Commit 失敗時，DB 可能其實已經寫入 (只是回應丟失)，
 // 反向加減會把「少扣」變成「多給」。刪除快取不需要知道真相，只要知道「不確定」就能正確處理。
@@ -272,7 +452,7 @@ func (u *walletUsecase) invalidateCache(ctx context.Context, req *domain.Transac
 
 	err := u.cache.Invalidate(cleanupCtx, req.UserID, req.Currency, req.ProviderID, req.ProviderTxID)
 	if err == nil {
-		log.Warn("wallet cache invalidated after DB failure")
+		log.Info("wallet cache invalidated")
 		return
 	}
 

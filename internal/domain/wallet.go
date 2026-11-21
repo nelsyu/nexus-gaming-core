@@ -40,7 +40,10 @@ type TransactionRequest struct {
 	Amount       decimal.Decimal `json:"amount"`         // 必須為正數
 	ProviderID   string          `json:"provider_id"`    // 第三方遊戲商 ID
 	ProviderTxID string          `json:"provider_tx_id"` // 遊戲商提供的唯一交易序號 (用於防重)
-	ReferenceID  string          `json:"reference_id"`   // 其他關聯 ID (例如 Round ID)
+	ReferenceID  string          `json:"reference_id"`   // 其他自由參考 ID
+
+	RoundID             string `json:"round_id"`               // 遊戲局 ID (BET / WIN 必填)
+	RelatedProviderTxID string `json:"related_provider_tx_id"` // REFUND 必填：要退款的原始 BET 交易序號
 }
 
 // WalletRepository 定義了錢包的儲存庫介面

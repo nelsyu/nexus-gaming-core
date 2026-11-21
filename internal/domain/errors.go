@@ -17,4 +17,14 @@ var (
 	ErrUnauthorized         = errors.New("unauthorized")
 	ErrForbidden            = errors.New("forbidden")
 	ErrInvalidAmount        = errors.New("invalid amount: must be greater than zero")
+
+	// 注單與退款規則
+	ErrRoundIDRequired       = errors.New("round_id is required for BET and WIN")
+	ErrRefundTargetRequired  = errors.New("related_provider_tx_id is required for REFUND")
+	ErrRefundTargetNotFound  = errors.New("original bet not found; bet has been voided") // 退款先到：已記錄作廢，之後的 BET 會被拒絕
+	ErrInvalidRefundTarget   = errors.New("refund target is not a BET of this wallet")
+	ErrBetAlreadyRefunded    = errors.New("bet has already been refunded")
+	ErrBetAlreadySettled     = errors.New("bet has already been settled; cannot refund")
+	ErrBetVoided             = errors.New("bet has been voided by an earlier refund")
+	ErrWinWithoutBet         = errors.New("no active bet found in this round")
 )
