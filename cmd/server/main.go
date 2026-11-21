@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -111,6 +112,7 @@ func main() {
 	// 初始化 Usecases
 	walletUsecase := usecase.NewWalletUsecase(uow, walletRepo, txRepo, walletCache, eventPublisher)
 	authUsecase := usecase.NewAuthUsecase(uow, userRepo, walletRepo, passwordHasher, jwtManager, refreshTokenRepo, tokenBlacklist)
+	providerAuth := usecase.NewProviderAuthenticator(postgres.NewProviderRepository(db), redis.NewNonceStore(rdb))
 
 	// 初始化 Handlers
 	walletHandler := nexushttp.NewWalletHandler(walletUsecase)
@@ -129,7 +131,17 @@ func main() {
 	}
 
 	// 7. 註冊路由與安全性中介軟體
-	router := nexushttp.SetupRouter(walletHandler, authHandler, jwtManager, tokenBlacklist)
+	router, err := nexushttp.SetupRouter(nexushttp.RouterDeps{
+		WalletHandler:  walletHandler,
+		AuthHandler:    authHandler,
+		TokenManager:   jwtManager,
+		Blacklist:      tokenBlacklist,
+		ProviderAuth:   providerAuth,
+		TrustedProxies: splitCSV(os.Getenv("TRUSTED_PROXIES")),
+	})
+	if err != nil {
+		logger.GetLogger().Fatal("Failed to setup router", zap.Error(err))
+	}
 
 	// 8. 啟動伺服器
 	// 使用 http.Server 而非 router.Run，才能設定逾時並支援優雅關機
@@ -163,4 +175,15 @@ func main() {
 	}
 	// main 返回後，上面註冊的 defer 依序關閉 RabbitMQ、Redis、DB 連線
 	logger.GetLogger().Info("Server exited")
+}
+
+// splitCSV 解析逗號分隔的設定值，略過空白項目；空字串回傳 nil
+func splitCSV(raw string) []string {
+	var out []string
+	for _, item := range strings.Split(raw, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
 }
