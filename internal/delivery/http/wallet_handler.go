@@ -3,21 +3,26 @@ package http
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 
 	"github.com/bosstest/nexus-core/internal/delivery/http/dto"
 	"github.com/bosstest/nexus-core/internal/delivery/http/response"
 	"github.com/bosstest/nexus-core/internal/domain"
+	"github.com/bosstest/nexus-core/pkg/logger"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 type WalletHandler struct {
 	walletUsecase domain.WalletUsecase
+	authorizer    domain.WalletAuthorizer
 }
 
-func NewWalletHandler(wu domain.WalletUsecase) *WalletHandler {
+func NewWalletHandler(wu domain.WalletUsecase, authorizer domain.WalletAuthorizer) *WalletHandler {
 	return &WalletHandler{
 		walletUsecase: wu,
+		authorizer:    authorizer,
 	}
 }
 
@@ -27,6 +32,12 @@ func (h *WalletHandler) GetBalance(c *gin.Context) {
 	var req dto.GetBalanceRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
 		response.ValidationError(c, err)
+		return
+	}
+
+	// 必須用綁定後的 req.UserID 判斷：若另外解析一次 query，兩邊解析規則不同時 (例如前後空白) 就能繞過
+	if err := h.authorizer.AuthorizeRead(c.Request.Context(), actorFromContext(c), req.UserID); err != nil {
+		respondAccessError(c, err)
 		return
 	}
 
@@ -51,29 +62,18 @@ var (
 
 // ProcessProviderTransaction 遊戲商呼叫的下注/派彩/退款 (需通過 ProviderAuthMiddleware)
 func (h *WalletHandler) ProcessProviderTransaction(c *gin.Context) {
-	h.processTransaction(c, providerTxTypes, true)
-}
-
-// ProcessAdminTransaction 營運後台的人工存款/提款 (需通過 JWT 與 RBAC)
-func (h *WalletHandler) ProcessAdminTransaction(c *gin.Context) {
-	h.processTransaction(c, adminTxTypes, false)
-}
-
-func (h *WalletHandler) processTransaction(c *gin.Context, allowedTypes []domain.TransactionType, requireProviderMatch bool) {
 	// 1. HTTP 層驗證：格式、必填、長度
 	var req dto.TransactionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.ValidationError(c, err)
 		return
 	}
-
-	if !slices.Contains(allowedTypes, req.Type) {
-		response.BadRequest(c, fmt.Sprintf("transaction type %s is not allowed on this endpoint", req.Type))
+	if !requireAllowedType(c, req.Type, providerTxTypes) {
 		return
 	}
 
 	// 簽章只證明「請求是遊戲商 A 發的」；還要確認 A 沒有在 body 裡冒用遊戲商 B 的名義
-	if requireProviderMatch && req.ProviderID != c.GetString(CtxProviderID) {
+	if req.ProviderID != c.GetString(CtxProviderID) {
 		response.Forbidden(c, "provider_id does not match the authenticated provider")
 		return
 	}
@@ -85,6 +85,61 @@ func (h *WalletHandler) processTransaction(c *gin.Context, allowedTypes []domain
 		return
 	}
 
+	h.execute(c, domainReq)
+}
+
+// ProcessAdminTransaction 營運後台的人工存款/提款 (需通過 JWT、RBAC 與租戶檢查)
+func (h *WalletHandler) ProcessAdminTransaction(c *gin.Context) {
+	var req dto.AdminTransactionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.ValidationError(c, err)
+		return
+	}
+	if !requireAllowedType(c, req.Type, adminTxTypes) {
+		return
+	}
+
+	actor := actorFromContext(c)
+	if err := h.authorizer.AuthorizeAdjust(c.Request.Context(), actor, req.UserID); err != nil {
+		respondAccessError(c, err)
+		return
+	}
+	providerID, err := domain.BackofficeProviderID(actor.TenantID)
+	if err != nil {
+		respondAccessError(c, err)
+		return
+	}
+
+	domainReq, err := req.ToDomain(providerID)
+	if err != nil {
+		response.BadRequest(c, "invalid amount format")
+		return
+	}
+
+	h.execute(c, domainReq)
+}
+
+func requireAllowedType(c *gin.Context, txType domain.TransactionType, allowed []domain.TransactionType) bool {
+	if slices.Contains(allowed, txType) {
+		return true
+	}
+	response.BadRequest(c, fmt.Sprintf("transaction type %s is not allowed on this endpoint", txType))
+	return false
+}
+
+func respondAccessError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, domain.ErrForbidden):
+		response.Forbidden(c, "forbidden")
+	case errors.Is(err, domain.ErrWalletNotFound):
+		response.NotFound(c, "wallet not found")
+	default:
+		logger.WithTraceID(c.Request.Context()).Error("Wallet authorization failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, response.ErrorResponse{Error: "internal server error"})
+	}
+}
+
+func (h *WalletHandler) execute(c *gin.Context, domainReq *domain.TransactionRequest) {
 	// 3. 執行業務邏輯
 	tx, err := h.walletUsecase.ProcessTransaction(c.Request.Context(), domainReq)
 	if err != nil {

@@ -115,7 +115,7 @@ func main() {
 	providerAuth := usecase.NewProviderAuthenticator(postgres.NewProviderRepository(db), redis.NewNonceStore(rdb))
 
 	// 初始化 Handlers
-	walletHandler := nexushttp.NewWalletHandler(walletUsecase)
+	walletHandler := nexushttp.NewWalletHandler(walletUsecase, usecase.NewWalletAuthorizer(userRepo))
 	authHandler := nexushttp.NewAuthHandler(authUsecase)
 
 	// 6. 註冊自定義驗證器並配置 Gin 使用 validate tag

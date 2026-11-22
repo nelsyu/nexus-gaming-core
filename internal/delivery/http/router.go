@@ -71,11 +71,12 @@ func SetupRouter(deps RouterDeps) (*gin.Engine, error) {
 		walletGroup := apiV1.Group("/wallet")
 		walletGroup.Use(AuthMiddleware(deps.TokenManager))
 		{
-			// 取得餘額：唯讀操作，不查黑名單以保持無狀態；受 TenantGuard 防護，禁止跨玩家/跨租戶橫向越權 (IDOR 防範)
-			walletGroup.GET("/balance", TenantGuardMiddleware(), deps.WalletHandler.GetBalance)
+			// 取得餘額：唯讀操作，不查黑名單。
+			// 「能看誰的餘額」在 handler 綁定參數之後才判斷，確保檢查的值就是實際查詢的值
+			walletGroup.GET("/balance", deps.WalletHandler.GetBalance)
 
 			// 人工存提款：涉及資金異動，額外檢查 Token 是否已被吊銷（即時阻斷）
-			// 僅限營運方 (Operator) 或系統管理員 (Admin)，且只允許 DEPOSIT / WITHDRAW
+			// 僅限營運方 (Operator) 或系統管理員 (Admin)，只允許 DEPOSIT / WITHDRAW，且只能對同租戶的使用者操作
 			walletGroup.POST("/transaction",
 				RevocationCheckMiddleware(deps.Blacklist),
 				RBACMiddleware(domain.RoleAdmin, domain.RoleOperator),

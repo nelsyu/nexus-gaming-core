@@ -150,7 +150,6 @@ func TestAuthUsecase_RegisterAndLogin(t *testing.T) {
 		Username: "alice",
 		Password: "password123",
 		Currency: "USD",
-		Role:     domain.RolePlayer,
 	}
 	user, err := authUc.Register(ctx, regReq)
 	assert.NoError(t, err)
@@ -218,7 +217,6 @@ func TestAuthUsecase_RefreshToken_And_Logout(t *testing.T) {
 		Username: "bob",
 		Password: "password123",
 		Currency: "EUR",
-		Role:     domain.RolePlayer,
 	}
 	_, err := authUc.Register(ctx, regReq)
 	assert.NoError(t, err)

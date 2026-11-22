@@ -189,32 +189,13 @@ func RBACMiddleware(allowedRoles ...domain.Role) gin.HandlerFunc {
 	}
 }
 
-// TenantGuardMiddleware 防範 IDOR (Insecure Direct Object Reference) 與 BOLA (Broken Object Level Authorization)
-// 確保一般玩家只能存取自己的錢包，禁止跨帳號與跨租戶橫向越權
-func TenantGuardMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		roleVal, _ := c.Get(CtxRole)
-		userRole, _ := roleVal.(domain.Role)
-
-		// 管理員具備管理權限
-		if userRole == domain.RoleAdmin {
-			c.Next()
-			return
-		}
-
-		callerUserIDVal, _ := c.Get(CtxUserID)
-		callerUserID, _ := callerUserIDVal.(int64)
-
-		// 檢查 Query 參數中的 user_id
-		reqUserIDStr := c.Query("user_id")
-		if reqUserIDStr != "" {
-			reqUserID, err := strconv.ParseInt(reqUserIDStr, 10, 64)
-			if err == nil && userRole == domain.RolePlayer && callerUserID != reqUserID {
-				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden: cannot access another user's wallet"})
-				return
-			}
-		}
-
-		c.Next()
+// actorFromContext 取出 AuthMiddleware 驗證過的身分。
+// 缺少任何欄位時會是零值，授權規則對零值一律拒絕。
+func actorFromContext(c *gin.Context) domain.Actor {
+	role, _ := c.Value(CtxRole).(domain.Role)
+	return domain.Actor{
+		UserID:   c.GetInt64(CtxUserID),
+		TenantID: c.GetString(CtxTenantID),
+		Role:     role,
 	}
 }

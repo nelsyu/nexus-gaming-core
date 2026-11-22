@@ -41,12 +41,8 @@ func NewAuthUsecase(
 	}
 }
 
-// Register 註冊新使用者並在同一個交易 (UoW) 中自動建立錢包
+// Register 公開註冊：一律建立玩家，並在同一個交易 (UoW) 中建立錢包
 func (u *authUsecase) Register(ctx context.Context, req *domain.RegisterRequest) (*domain.User, error) {
-	if req.Role == "" {
-		req.Role = domain.RolePlayer
-	}
-
 	// 1. 雜湊密碼 (不可逆 + Salt)
 	hashedPassword, err := u.hasher.HashPassword(req.Password)
 	if err != nil {
@@ -57,7 +53,7 @@ func (u *authUsecase) Register(ctx context.Context, req *domain.RegisterRequest)
 		TenantID:     req.TenantID,
 		Username:     req.Username,
 		PasswordHash: hashedPassword,
-		Role:         req.Role,
+		Role:         domain.RolePlayer,
 		Currency:     req.Currency,
 	}
 
@@ -67,17 +63,14 @@ func (u *authUsecase) Register(ctx context.Context, req *domain.RegisterRequest)
 			return err
 		}
 
-		// 如果是玩家角色，自動建立一個初始錢包
-		if user.Role == domain.RolePlayer {
-			wallet := &domain.Wallet{
-				UserID:   user.ID,
-				Balance:  decimal.Zero,
-				Currency: user.Currency,
-				Version:  1,
-			}
-			if err := u.walletRepo.CreateWallet(txCtx, wallet); err != nil {
-				return err
-			}
+		wallet := &domain.Wallet{
+			UserID:   user.ID,
+			Balance:  decimal.Zero,
+			Currency: user.Currency,
+			Version:  1,
+		}
+		if err := u.walletRepo.CreateWallet(txCtx, wallet); err != nil {
+			return err
 		}
 		return nil
 	})

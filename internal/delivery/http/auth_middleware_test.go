@@ -52,10 +52,6 @@ func setupTestRouter(tokenManager domain.TokenManager, blacklist domain.TokenBla
 			c.JSON(http.StatusOK, gin.H{"status": "admin_access_granted"})
 		})
 
-		protected.GET("/wallet", nexushttp.TenantGuardMiddleware(), func(c *gin.Context) {
-			c.JSON(http.StatusOK, gin.H{"status": "wallet_access_granted"})
-		})
-
 		// 模擬敏感路由（如交易）：額外檢查黑名單
 		protected.POST("/sensitive", nexushttp.RevocationCheckMiddleware(blacklist), func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"status": "sensitive_access_granted"})
@@ -184,43 +180,6 @@ func TestRBACMiddleware(t *testing.T) {
 
 	t.Run("Admin accesses Admin endpoint -> 200 OK", func(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodGet, "/protected/admin-only", nil)
-		req.Header.Set("Authorization", "Bearer "+adminTokens.AccessToken)
-		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
-	})
-}
-
-func TestTenantGuard_IDOR_Prevention(t *testing.T) {
-	secret := "test-secret-key-1234567890123456"
-	tokenManager := auth.NewJWTManager(secret, 15*time.Minute, 24*time.Hour)
-	blacklist := newMockTokenBlacklist()
-	router := setupTestRouter(tokenManager, blacklist)
-
-	player1 := &domain.User{ID: 101, TenantID: "TENANT_A", Username: "player1", Role: domain.RolePlayer}
-	admin := &domain.User{ID: 999, TenantID: "TENANT_A", Username: "admin", Role: domain.RoleAdmin}
-
-	player1Tokens, _ := tokenManager.GenerateTokenPair(player1)
-	adminTokens, _ := tokenManager.GenerateTokenPair(admin)
-
-	t.Run("Player accesses own wallet (user_id=101) -> 200 OK", func(t *testing.T) {
-		req, _ := http.NewRequest(http.MethodGet, "/protected/wallet?user_id=101", nil)
-		req.Header.Set("Authorization", "Bearer "+player1Tokens.AccessToken)
-		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
-	})
-
-	t.Run("Player attempts IDOR / BOLA on another user (user_id=102) -> 403 Forbidden", func(t *testing.T) {
-		req, _ := http.NewRequest(http.MethodGet, "/protected/wallet?user_id=102", nil)
-		req.Header.Set("Authorization", "Bearer "+player1Tokens.AccessToken)
-		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusForbidden, w.Code)
-	})
-
-	t.Run("Admin accesses player's wallet (user_id=101) -> 200 OK", func(t *testing.T) {
-		req, _ := http.NewRequest(http.MethodGet, "/protected/wallet?user_id=101", nil)
 		req.Header.Set("Authorization", "Bearer "+adminTokens.AccessToken)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)

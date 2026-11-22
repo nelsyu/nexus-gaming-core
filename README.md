@@ -85,10 +85,23 @@ make seed
 ### 進行 K6 壓力測試
 系統啟動後，你可以對金流 API 進行極限壓測（預設為 50 個 VU 持續 10 秒）。
 1. (可選) 資料庫初始化時預設已給予測試玩家 1000 元餘額。由於壓測非常猛烈，餘額可能會在幾秒內耗盡，此時 API 會回傳 `402 Insufficient Funds` (這也是預期的阻擋行為)。若你想讓全部請求都是 200 OK，可以先用以下指令充值 10,000 元：
+
+   公開註冊只能建立玩家，後台帳號目前沒有建立用的 API。本機測試請先註冊，再用 SQL 改角色，最後登入：
+   ```bash
+   curl -X POST http://localhost:8080/api/v1/auth/register -H "Content-Type: application/json" \
+   -d '{"tenant_id":"TENANT_A","username":"local_operator","password":"local-pass-123","currency":"TWD"}'
+
+   docker exec nexus_db psql -U postgres -d nexus_db -c \
+   "UPDATE users SET role='operator' WHERE tenant_id='TENANT_A' AND username='local_operator'"
+
+   curl -X POST http://localhost:8080/api/v1/auth/login -H "Content-Type: application/json" \
+   -d '{"tenant_id":"TENANT_A","username":"local_operator","password":"local-pass-123"}'
+   ```
+   用回應中的 `access_token` 充值 (只能對同租戶的玩家操作，`provider_id` 由伺服器決定)：
    ```bash
    curl -X POST http://localhost:8080/api/v1/wallet/transaction \
-   -H "Content-Type: application/json" \
-   -d '{"user_id":1,"currency":"TWD","type":"DEPOSIT","amount":"10000.00","provider_id":"ADMIN","provider_tx_id":"init_fund_01","reference_id":""}'
+   -H "Content-Type: application/json" -H "Authorization: Bearer <access_token>" \
+   -d '{"user_id":1,"currency":"TWD","type":"DEPOSIT","amount":"10000.00","provider_tx_id":"init_fund_01"}'
    ```
 2. 啟動壓力測試：
    ```bash

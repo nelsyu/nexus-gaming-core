@@ -19,13 +19,12 @@ func NewAuthHandler(authUsecase domain.AuthUsecase) *AuthHandler {
 	}
 }
 
-// RegisterRequest HTTP 註冊請求 DTO
+// RegisterRequest HTTP 註冊請求 DTO (沒有 role：公開註冊一律是玩家)
 type RegisterRequest struct {
-	TenantID string      `json:"tenant_id" validate:"required,min=2,max=30"`
-	Username string      `json:"username" validate:"required,min=3,max=50"`
-	Password string      `json:"password" validate:"required,min=6,max=100"`
-	Currency string      `json:"currency" validate:"required,len=3"`
-	Role     domain.Role `json:"role"`
+	TenantID string `json:"tenant_id" validate:"required,min=2,max=30"`
+	Username string `json:"username" validate:"required,min=3,max=50"`
+	Password string `json:"password" validate:"required,min=6,max=100"`
+	Currency string `json:"currency" validate:"required,len=3"`
 }
 
 // LoginRequest HTTP 登入請求 DTO
@@ -58,7 +57,6 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		Username: req.Username,
 		Password: req.Password,
 		Currency: req.Currency,
-		Role:     req.Role,
 	})
 	if err != nil {
 		if errors.Is(err, domain.ErrUserAlreadyExists) {

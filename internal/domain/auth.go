@@ -24,13 +24,13 @@ type TokenPair struct {
 	TokenType    string `json:"token_type"` // 固定為 "Bearer"
 }
 
-// RegisterRequest 註冊業務參數
+// RegisterRequest 公開註冊的業務參數。
+// 刻意沒有 Role 欄位：公開註冊只能建立玩家，角色不能由呼叫者決定。
 type RegisterRequest struct {
 	TenantID string `json:"tenant_id"`
 	Username string `json:"username"`
 	Password string `json:"password"`
 	Currency string `json:"currency"`
-	Role     Role   `json:"role"`
 }
 
 // LoginRequest 登入業務參數

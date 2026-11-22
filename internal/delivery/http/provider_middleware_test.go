@@ -44,6 +44,12 @@ func (f *fakeWalletUsecase) ProcessTransaction(_ context.Context, req *domain.Tr
 	return &domain.Transaction{ID: 1, Type: req.Type, Amount: req.Amount, ProviderID: req.ProviderID}, nil
 }
 
+// allowAllAuthorizer 授權規則另有測試 (authz_boundary_test.go)，這裡只測遊戲商與交易類型
+type allowAllAuthorizer struct{}
+
+func (allowAllAuthorizer) AuthorizeRead(context.Context, domain.Actor, int64) error   { return nil }
+func (allowAllAuthorizer) AuthorizeAdjust(context.Context, domain.Actor, int64) error { return nil }
+
 var registerValidatorsOnce sync.Once
 
 // 與 cmd/server/main.go 相同的驗證器設定，handler 才能正確解析 DTO
@@ -60,12 +66,13 @@ func newProviderRouter(t *testing.T, auth domain.ProviderAuthenticator, trusted 
 	gin.SetMode(gin.TestMode)
 	registerValidators(t)
 	uc := &fakeWalletUsecase{}
-	h := NewWalletHandler(uc)
+	h := NewWalletHandler(uc, allowAllAuthorizer{})
 
 	r := gin.New()
 	require.NoError(t, r.SetTrustedProxies(trusted))
 	r.POST("/api/v1/provider/transaction", ProviderAuthMiddleware(auth), h.ProcessProviderTransaction)
-	r.POST("/api/v1/wallet/transaction", h.ProcessAdminTransaction) // 省略 JWT，只測交易類型限制
+	// 省略 JWT，直接放入身分，只測交易類型限制
+	r.POST("/api/v1/wallet/transaction", func(c *gin.Context) { c.Set(CtxTenantID, "TENANT_A") }, h.ProcessAdminTransaction)
 	return r, uc
 }
 
